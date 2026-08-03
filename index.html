@@ -710,8 +710,12 @@
           <span class="result-row-val highlight" id="res-psp">—</span>
         </div>
         <div class="result-row">
-          <span class="result-row-key">Typ</span>
-          <span class="result-row-val" id="res-typ">—</span>
+          <span class="result-row-key">Odkud</span>
+          <span class="result-row-val" id="res-odkud">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-row-key">Kam</span>
+          <span class="result-row-val" id="res-kam">—</span>
         </div>
         <div class="result-row">
           <span class="result-row-key">Akce</span>
@@ -722,6 +726,12 @@
           <span class="result-row-val" id="res-cas">—</span>
         </div>
       </div>
+    </div>
+
+    <!-- Všechny položky na PSP -->
+    <div id="psp-polozky-section" style="display:none;">
+      <div class="section-title">Všechny položky na tomto PSP</div>
+      <div id="psp-polozky-list" style="display:flex;flex-direction:column;gap:6px;"></div>
     </div>
 
     <!-- Lokace – jen pro příjem -->
@@ -1090,23 +1100,40 @@ async function showConfirmScreen(id) {
   const now = new Date();
   el('res-id').textContent = id;
   el('res-name').textContent = 'Načítám z evidence…';
-  el('res-psp').textContent = '…';
-  el('res-typ').textContent = '…';
-  el('res-cas').textContent = formatTime(now);
-  el('res-akce').textContent = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
+  el('res-psp').textContent  = '…';
+  el('res-odkud').textContent = '…';
+  el('res-kam').textContent   = '…';
+  el('res-cas').textContent   = formatTime(now);
+  el('res-akce').textContent  = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
+  el('psp-polozky-section').style.display = 'none';
+  el('result-card').classList.remove('warning','success','error');
 
   const isPrijem = state.currentAction === 'prijem';
   el('lokace-section').style.display = isPrijem ? 'flex' : 'none';
-
   renderLokacePresets();
 
   // Lookup from sheets (or demo data)
   const info = await lookupStroj(id);
-  el('res-name').textContent = info.nazev || 'Stroj nenalezen v evidenci';
-  el('res-psp').textContent = info.psp || 'Bez PSP';
-  el('res-typ').textContent = info.typ || '—';
 
-  if (!info.nazev) {
+  // Ulož info do state pro pozdější uložení
+  state.currentInfo = info;
+
+  el('res-name').textContent  = info.nazev       || 'Stroj nenalezen v evidenci';
+  el('res-psp').textContent   = info.cisloPsp    || info.psp || 'Bez PSP';
+  el('res-odkud').textContent = info.pobNakladka || '—';
+  el('res-kam').textContent   = info.pobVykladka || '—';
+
+  // Zobraz všechny položky PSP
+  if (info.polozky && info.polozky.length > 0) {
+    el('psp-polozky-section').style.display = 'flex';
+    el('psp-polozky-list').innerHTML = info.polozky.map(p => `
+      <div class="result-row" style="flex-direction:column;align-items:flex-start;gap:3px;">
+        <span class="result-row-val" style="font-size:13px;">${p.nazev || '—'}</span>
+        <span class="result-row-key" style="font-size:11px;">${p.ecPuj || ''} ${p.polozka ? '· ' + p.polozka : ''}</span>
+      </div>`).join('');
+  }
+
+  if (!info.nalezeno && !info.nazev) {
     el('result-card').classList.add('warning');
   }
 }
@@ -1123,25 +1150,104 @@ async function lookupStroj(id) {
   if (state.config.demoMode || !state.config.scriptUrl) {
     return demoLookup(id);
   }
+
+  // Pokus 1: přímý fetch (funguje pokud Apps Script povolí CORS)
   try {
-    const url = `${state.config.scriptUrl}?action=lookup&id=${encodeURIComponent(id)}`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    return data;
+    const url = state.config.scriptUrl
+      + '?action=lookup'
+      + '&id=' + encodeURIComponent(id);
+    const resp = await fetch(url, { redirect: 'follow' });
+    const text = await resp.text();
+    // Apps Script někdy vrátí HTML chybovou stránku – zkontroluj
+    if (text.trim().startsWith('{')) {
+      const data = JSON.parse(text);
+      if (data && (data.nalezeno !== undefined || data.chyba)) {
+        return data;
+      }
+    }
   } catch(e) {
-    return demoLookup(id);
+    console.warn('Fetch failed, zkouším JSONP:', e.message);
   }
+
+  // Pokus 2: JSONP
+  return new Promise((resolve) => {
+    const callbackName = 'cb' + Date.now();
+    const script = document.createElement('script');
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve({ nalezeno: false, zprava: 'Timeout – zkontroluj URL skriptu' });
+    }, 10000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[callbackName] = function(data) {
+      cleanup();
+      resolve(data);
+    };
+
+    const url = state.config.scriptUrl
+      + '?action=lookup'
+      + '&id=' + encodeURIComponent(id)
+      + '&callback=' + callbackName;
+
+    script.src = url;
+    script.onerror = () => {
+      cleanup();
+      resolve({ nalezeno: false, zprava: 'Chyba připojení ke skriptu' });
+    };
+    document.head.appendChild(script);
+  });
 }
 
-// Demo data – realistic DEK-style entries
+// Demo data – realistic DEK-style entries matching real API structure
 function demoLookup(id) {
   const db = {
-    '9JT9': { nazev: 'Vibrační deska reverzní do 200 kg', typ: 'BOMAG BPR 35/60', psp: 'PSP-100-26-00329' },
-    '1X7M': { nazev: 'Plovoucí vibrační lišta', typ: 'ENAR QZH', psp: 'PSP-140-26-00091' },
-    '49XE': { nazev: 'Úhlová bruska 230mm', typ: 'BOSCH GWS 24-230', psp: 'PSP-305-26-00195' },
-    '61EJ': { nazev: 'Míchač stavebních směsí', typ: 'COLLOMIX XO 4', psp: 'PSP-120-26-00191' },
+    '9JT9': {
+      nalezeno: true, id: '9JT9',
+      nazev: 'Vibrační deska reverzní do 200 kg',
+      cisloPsp: 'PSP-100-26-00329',
+      pobNakladka: 'Praha Hostivař', idNakladka: 'P100',
+      pobVykladka: 'Sokolov',        idVykladka: 'P305',
+      ecPuj: 'PUJ-22-00124',
+      polozky: [{ nazev: 'Vibrační deska reverzní do 200 kg', ecPuj: 'PUJ-22-00124', polozka: 'PP00098' }]
+    },
+    '1X7M': {
+      nalezeno: true, id: '1X7M',
+      nazev: 'Plovoucí vibrační lišta 3m',
+      cisloPsp: 'PSP-140-26-00091',
+      pobNakladka: 'Kolín',   idNakladka: 'P140',
+      pobVykladka: 'CS2',     idVykladka: 'P096',
+      ecPuj: 'PUJ-21-00087',
+      polozky: [
+        { nazev: 'Plovoucí vibrační lišta 3m', ecPuj: 'PUJ-21-00087', polozka: 'PP00201' },
+        { nazev: 'Prodlužovací profil 1m',     ecPuj: 'PUJ-21-00088', polozka: 'PP00202' },
+      ]
+    },
+    '49XE': {
+      nalezeno: true, id: '49XE',
+      nazev: 'Ponorný vibrátor betonu',
+      cisloPsp: 'PSP-305-26-00195',
+      pobNakladka: 'Sokolov', idNakladka: 'P305',
+      pobVykladka: 'CS2',     idVykladka: 'P096',
+      ecPuj: 'PUJ-23-00412',
+      polozky: [{ nazev: 'Ponorný vibrátor betonu', ecPuj: 'PUJ-23-00412', polozka: 'PP00315' }]
+    },
+    '61EJ': {
+      nalezeno: true, id: '61EJ',
+      nazev: 'Míchač stavebních směsí 140L',
+      cisloPsp: 'PSP-120-26-00191',
+      pobNakladka: 'CS2',      idNakladka: 'P096',
+      pobVykladka: 'Liberec',  idVykladka: 'P120',
+      ecPuj: 'PUJ-20-00055',
+      polozky: [{ nazev: 'Míchač stavebních směsí 140L', ecPuj: 'PUJ-20-00055', polozka: 'PP00089' }]
+    },
   };
-  return db[id.toUpperCase()] || {};
+  return db[id.toUpperCase()] || { nalezeno: false, id };
 }
 
 // ─────────────────────────────────────────────
@@ -1177,15 +1283,18 @@ async function confirmMove() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Ukládám…';
 
+  const info = state.currentInfo || {};
   const record = {
-    id:      state.currentId,
-    psp:     el('res-psp').textContent,
-    nazev:   el('res-name').textContent,
-    typ:     el('res-typ').textContent,
-    akce:    state.currentAction,
-    lokace:  isPrijem ? lokace : '—',
-    sklad:   state.config.location,
-    cas:     new Date().toISOString(),
+    id:          state.currentId,
+    psp:         info.cisloPsp    || el('res-psp').textContent,
+    nazev:       info.nazev       || el('res-name').textContent,
+    ecPuj:       info.ecPuj       || '',
+    akce:        state.currentAction,
+    pobNakladka: info.pobNakladka || '',
+    pobVykladka: info.pobVykladka || '',
+    lokace:      isPrijem ? lokace : '—',
+    sklad:       state.config.location,
+    cas:         new Date().toISOString(),
   };
 
   const ok = await saveRecord(record);
