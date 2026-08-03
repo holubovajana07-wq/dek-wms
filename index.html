@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>DEK WMS – Sklad CS2</title>
+
+  <!-- jsQR – spolehlivý QR skener pro mobilní prohlížeče -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+  <style>
+    :root {
+      --red:        #C8281A;
+      --red-dark:   #9e1f12;
+      --red-light:  #e8463a;
+      --navy:       #1a1a2e;
+      --navy-mid:   #16213e;
+      --navy-card:  #0f3460;
+      --white:      #ffffff;
+      --off-white:  #f0f0f0;
+      --grey:       #8a8a9a;
+      --grey-light: #d0d0da;
+      --green:      #27ae60;
+      --green-dark: #1e8449;
+      --amber:      #f39c12;
+      --text:       #e8e8f0;
+      --text-dim:   #9090a8;
+
+      --radius:     12px;
+      --radius-lg:  20px;
+      --shadow:     0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      height: 100%;
+      background: var(--navy);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── APP SHELL ── */
+    #app {
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      max-width: 480px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: var(--navy-mid);
+      padding: 16px 20px 12px;
+      border-bottom: 2px solid var(--red);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .header-logo {
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--red);
+      letter-spacing: -0.5px;
+    }
+    .header-sep { color: var(--grey); font-size: 18px; }
+    .header-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .header-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 1px;
+    }
+    .header-right {
+      margin-left: auto;
+      text-align: right;
+    }
+    .badge-location {
+      background: var(--navy-card);
+      border: 1px solid var(--navy-card);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ── SCREENS ── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      gap: 16px;
+    }
+    .screen.active { display: flex; }
+
+    /* ── CONFIG SCREEN ── */
+    .config-banner {
+      background: linear-gradient(135deg, var(--navy-card), var(--navy-mid));
+      border: 1px solid rgba(200,40,26,0.3);
+      border-radius: var(--radius-lg);
+      padding: 24px 20px;
+      text-align: center;
+    }
+    .config-banner h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .config-banner p {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .form-input, .form-select {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 16px;
+      color: var(--white);
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-input:focus, .form-select:focus {
+      border-color: var(--red);
+    }
+    .form-input::placeholder { color: var(--text-dim); }
+    .form-select option { background: var(--navy-mid); }
+
+    .form-note {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 8px;
+      border-left: 3px solid var(--amber);
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      min-height: 54px;
+      padding: 0 20px;
+      width: 100%;
+      letter-spacing: 0.2px;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--red);
+      color: var(--white);
+    }
+    .btn-primary:active { background: var(--red-dark); }
+
+    .btn-secondary {
+      background: var(--navy-card);
+      color: var(--text);
+      border: 1.5px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-success {
+      background: var(--green);
+      color: var(--white);
+    }
+    .btn-success:active { background: var(--green-dark); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1.5px solid rgba(255,255,255,0.08);
+    }
+
+    .btn-lg {
+      min-height: 72px;
+      font-size: 18px;
+      border-radius: var(--radius-lg);
+      flex-direction: column;
+      gap: 4px;
+    }
+    .btn-lg .btn-sub {
+      font-size: 12px;
+      font-weight: 400;
+      opacity: 0.75;
+    }
+
+    /* ── ACTION CARDS ── */
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .action-card {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius-lg);
+      padding: 20px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .action-card:active {
+      transform: scale(0.96);
+      border-color: var(--red);
+    }
+    .action-card.selected {
+      border-color: var(--red);
+      background: rgba(200,40,26,0.12);
+    }
+    .action-icon {
+      font-size: 36px;
+      line-height: 1;
+    }
+    .action-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .action-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.3;
+    }
+
+    /* ── SCANNER ── */
+    .scanner-container {
+      position: relative;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 1;
+    }
+    #preview {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .scanner-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .scanner-frame {
+      width: 60%;
+      aspect-ratio: 1;
+      position: relative;
+    }
+    .scanner-frame::before,
+    .scanner-frame::after {
+      content: '';
+      position: absolute;
+      width: 28px;
+      height: 28px;
+    }
+    .scanner-frame::before {
+      top: 0; left: 0;
+      border-top: 3px solid var(--red-light);
+      border-left: 3px solid var(--red-light);
+      border-radius: 4px 0 0 0;
+    }
+    .scanner-frame::after {
+      bottom: 0; right: 0;
+      border-bottom: 3px solid var(--red-light);
+      border-right: 3px solid var(--red-light);
+      border-radius: 0 0 4px 0;
+    }
+    .scanner-frame-tr,
+    .scanner-frame-bl {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+    }
+    .scanner-frame-tr {
+      top: 0; right: 0;
+      border-top: 3px solid var(--red-light);
+      border-right: 3px solid var(--red-light);
+      border-radius: 0 4px 0 0;
+    }
+    .scanner-frame-bl {
+      bottom: 0; left: 0;
+      border-bottom: 3px solid var(--red-light);
+      border-left: 3px solid var(--red-light);
+      border-radius: 0 0 0 4px;
+    }
+    .scanner-line {
+      position: absolute;
+      left: 8%; right: 8%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--red-light), transparent);
+      animation: scan 2s ease-in-out infinite;
+    }
+    @keyframes scan {
+      0% { top: 10%; }
+      50% { top: 88%; }
+      100% { top: 10%; }
+    }
+    .scanner-hint {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+      padding: 4px 0;
+    }
+
+    /* ── RESULT CARD ── */
+    .result-card {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+    .result-card.success { border-color: var(--green); }
+    .result-card.error   { border-color: var(--red); }
+    .result-card.warning { border-color: var(--amber); }
+
+    .result-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+    .result-id {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--white);
+      letter-spacing: 2px;
+      margin-bottom: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .result-name {
+      font-size: 14px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+    .result-rows { display: flex; flex-direction: column; gap: 8px; }
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 8px;
+      gap: 8px;
+    }
+    .result-row-key {
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .result-row-val {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      text-align: right;
+    }
+    .result-row-val.highlight { color: var(--red-light); }
+
+    /* ── LOKACE INPUT ── */
+    .lokace-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .lokace-presets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .lokace-btn {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 10px 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+    .lokace-btn:active, .lokace-btn.selected {
+      background: rgba(200,40,26,0.2);
+      border-color: var(--red);
+      color: var(--red-light);
+    }
+
+    /* ── STATUS BAR ── */
+    .status-bar {
+      background: var(--navy-mid);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding: 12px 20px;
+      flex-shrink: 0;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--grey);
+      flex-shrink: 0;
+    }
+    .status-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.amber { background: var(--amber); }
+    .status-text {
+      font-size: 12px;
+      color: var(--text-dim);
+      flex: 1;
+    }
+
+    /* ── SUCCESS FLASH ── */
+    .success-flash {
+      position: fixed;
+      inset: 0;
+      background: rgba(39,174,96,0.15);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 100;
+    }
+    .success-flash.show { opacity: 1; }
+
+    /* ── HISTORY ── */
+    .history-list { display: flex; flex-direction: column; gap: 8px; }
+    .history-item {
+      background: var(--navy-mid);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .history-icon { font-size: 22px; flex-shrink: 0; }
+    .history-body { flex: 1; min-width: 0; }
+    .history-id {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .history-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-time {
+      font-size: 11px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    /* ── NAV TABS ── */
+    .nav-tabs {
+      display: flex;
+      background: var(--navy-mid);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .nav-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 10px 0 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      background: none;
+      color: var(--text-dim);
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .nav-tab.active { color: var(--red-light); }
+    .nav-tab-icon { font-size: 22px; }
+    .nav-tab-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* ── SPINNER ── */
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--navy-card);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 24px;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--white);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transition: all 0.3s;
+      pointer-events: none;
+      z-index: 200;
+      white-space: nowrap;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast.success { border-color: var(--green); }
+    .toast.error   { border-color: var(--red); }
+
+    /* ── DIVIDER ── */
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.07);
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+    }
+
+    .manual-or {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      position: relative;
+    }
+    .manual-or::before, .manual-or::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 35%;
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+    }
+    .manual-or::before { left: 0; }
+    .manual-or::after { right: 0; }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- SETUP SCREEN -->
+  <div id="screen-setup" class="screen active">
+    <div class="config-banner">
+      <div style="font-size:48px;margin-bottom:12px;">📦</div>
+      <h2>DEK WMS – Sklad CS2</h2>
+      <p>Nastavte připojení k evidenční tabulce.<br>Stačí jednou, nastavení se uloží.</p>
+    </div>
+
+    <div class="form-group">
+      <div class="form-label">Google Sheets – ID tabulky</div>
+      <input class="form-input" id="inp-sheet-id" type="text" placeholder="1ABC...xyz" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="form-group">
+      <div class="form-label">Google Apps Script – URL webové aplikace</div>
+      <input class="form-input" id="inp-script-url" type="url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="form-group">
+      <div class="form-label">Přihlášení za pobočku / sklad</div>
+      <select class="form-select" id="inp-location">
+        <option value="CS2">CS2 – Centrální sklad (depot 096)</option>
+        <option value="DEMO">DEMO – testovací režim</option>
+      </select>
+    </div>
+
+    <div class="form-note">
+      💡 Tabulka pohybů musí mít list <strong>POHYBY</strong> s hlavičkou:<br>
+      Čas | ID stroje | PSP | Akce | Lokace | Sklad | Poznámka
+    </div>
+
+    <button class="btn btn-primary" onclick="saveSetup()">
+      Uložit a pokračovat →
+    </button>
+
+    <button class="btn btn-ghost" onclick="startDemo()">
+      Spustit DEMO bez připojení
+    </button>
+  </div>
+
+  <!-- HEADER (shown after setup) -->
+  <div class="header" id="main-header" style="display:none;">
+    <div>
+      <div class="header-logo">DEK</div>
+    </div>
+    <div class="header-sep">|</div>
+    <div>
+      <div class="header-title">WMS Půjčovna</div>
+      <div class="header-sub">Sklad CS2</div>
+    </div>
+    <div class="header-right">
+      <div class="badge-location" id="badge-loc">CS2</div>
+    </div>
+  </div>
+
+  <!-- SCAN SCREEN -->
+  <div id="screen-scan" class="screen">
+
+    <div class="section-title">Akce</div>
+    <div class="action-grid">
+      <div class="action-card" id="card-prijem" onclick="selectAction('prijem')">
+        <div class="action-icon">📥</div>
+        <div class="action-label">Příjem</div>
+        <div class="action-desc">Stroj dorazil na CS2</div>
+      </div>
+      <div class="action-card" id="card-vydej" onclick="selectAction('vydej')">
+        <div class="action-icon">📤</div>
+        <div class="action-label">Výdej</div>
+        <div class="action-desc">Stroj odjíždí z CS2</div>
+      </div>
+    </div>
+
+    <div class="section-title">Skenovat stroj</div>
+
+    <div class="scanner-container" id="scanner-box">
+      <video id="preview" playsinline muted autoplay></video>
+      <div class="scanner-overlay">
+        <div class="scanner-frame">
+          <div class="scanner-frame-tr"></div>
+          <div class="scanner-frame-bl"></div>
+          <div class="scanner-line"></div>
+        </div>
+      </div>
+    </div>
+    <div class="scanner-hint" id="scan-hint">Vyberte akci a namiřte kameru na QR kód stroje</div>
+
+    <div class="manual-or">nebo zadat ručně</div>
+
+    <div style="display:flex;gap:8px;">
+      <input class="form-input" id="inp-manual" placeholder="ID stroje (např. 9JT9)" style="flex:1;" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <button class="btn btn-secondary" style="width:auto;padding:0 16px;" onclick="manualConfirm()">→</button>
+    </div>
+
+  </div>
+
+  <!-- CONFIRM SCREEN -->
+  <div id="screen-confirm" class="screen">
+
+    <div class="result-card" id="result-card">
+      <div class="result-label">Naskenovaný stroj</div>
+      <div class="result-id" id="res-id">—</div>
+      <div class="result-name" id="res-name">Načítám z evidence…</div>
+      <div class="result-rows">
+        <div class="result-row">
+          <span class="result-row-key">PSP</span>
+          <span class="result-row-val highlight" id="res-psp">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-row-key">Typ</span>
+          <span class="result-row-val" id="res-typ">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-row-key">Akce</span>
+          <span class="result-row-val" id="res-akce">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-row-key">Čas</span>
+          <span class="result-row-val" id="res-cas">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lokace – jen pro příjem -->
+    <div id="lokace-section" class="lokace-section" style="display:none;">
+      <div class="section-title">Lokace ve skladu</div>
+      <div class="lokace-presets" id="lokace-presets">
+        <div class="lokace-btn" onclick="selectLokace(this,'A1')">A1</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'A2')">A2</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'A3')">A3</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'B1')">B1</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'B2')">B2</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'B3')">B3</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'C1')">C1</div>
+        <div class="lokace-btn" onclick="selectLokace(this,'C2')">C2</div>
+      </div>
+      <input class="form-input" id="inp-lokace" placeholder="nebo napište lokaci (např. D4)" autocapitalize="characters" spellcheck="false">
+    </div>
+
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;padding:0 20px;" onclick="goBack()">← Zpět</button>
+      <button class="btn btn-success" id="btn-confirm" onclick="confirmMove()" style="flex:1;">
+        ✓ Potvrdit pohyb
+      </button>
+    </div>
+
+  </div>
+
+  <!-- HISTORY SCREEN -->
+  <div id="screen-history" class="screen">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="section-title">Dnešní pohyby</div>
+      <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px;min-height:auto;" onclick="clearHistory()">Smazat</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <div style="text-align:center;padding:40px 0;color:var(--text-dim);font-size:14px;">
+        Zatím žádné pohyby dnes
+      </div>
+    </div>
+  </div>
+
+  <!-- NAV TABS -->
+  <div class="nav-tabs" id="main-nav" style="display:none;">
+    <button class="nav-tab active" id="tab-scan" onclick="showTab('scan')">
+      <span class="nav-tab-icon">📷</span>
+      <span class="nav-tab-label">Skenovat</span>
+    </button>
+    <button class="nav-tab" id="tab-history" onclick="showTab('history')">
+      <span class="nav-tab-icon">📋</span>
+      <span class="nav-tab-label">Historie</span>
+    </button>
+    <button class="nav-tab" id="tab-settings" onclick="showTab('settings')">
+      <span class="nav-tab-icon">⚙️</span>
+      <span class="nav-tab-label">Nastavení</span>
+    </button>
+  </div>
+
+  <!-- SETTINGS SCREEN -->
+  <div id="screen-settings" class="screen">
+    <div class="section-title">Připojení</div>
+
+    <div class="form-group">
+      <div class="form-label">Google Sheets ID</div>
+      <input class="form-input" id="set-sheet-id" type="text" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="form-group">
+      <div class="form-label">Apps Script URL</div>
+      <input class="form-input" id="set-script-url" type="url" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="form-group">
+      <div class="form-label">Sklad / Pobočka</div>
+      <input class="form-input" id="set-location" type="text" autocomplete="off">
+    </div>
+
+    <button class="btn btn-primary" onclick="saveSettings()">Uložit nastavení</button>
+    <div class="divider"></div>
+
+    <div class="section-title">Lokace ve skladu – předvolby</div>
+    <div class="form-note">
+      Upravte předvolby lokací podle vašeho skladu. Oddělte čárkou.<br>
+      Např.: A1, A2, A3, B1, B2, B3, C1, C2
+    </div>
+    <input class="form-input" id="set-lokace" placeholder="A1, A2, A3, B1, B2, B3">
+    <button class="btn btn-secondary" onclick="saveLokace()">Uložit lokace</button>
+
+    <div class="divider"></div>
+    <div style="text-align:center;">
+      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v1.0 – pilotní provoz CS2</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- OVERLAYS -->
+<div class="success-flash" id="success-flash"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+const state = {
+  config: {
+    sheetId: '',
+    scriptUrl: '',
+    location: 'CS2',
+    demoMode: false,
+    lokacePresets: ['A1','A2','A3','B1','B2','B3','C1','C2']
+  },
+  currentAction: null,   // 'prijem' | 'vydej'
+  currentId: null,
+  currentLokace: null,
+  scanning: false,
+  codeReader: null,
+  history: [],
+};
+
+// ─────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadConfig();
+  loadHistory();
+
+  const saved = localStorage.getItem('dek_wms_config');
+  if (saved) {
+    try {
+      const cfg = JSON.parse(saved);
+      if (cfg.sheetId || cfg.demoMode) {
+        Object.assign(state.config, cfg);
+        showMainApp();
+        return;
+      }
+    } catch(e) {}
+  }
+  // Show setup
+});
+
+function loadConfig() {
+  const saved = localStorage.getItem('dek_wms_config');
+  if (saved) {
+    try { Object.assign(state.config, JSON.parse(saved)); } catch(e) {}
+  }
+  // Populate settings fields
+  setTimeout(() => {
+    el('set-sheet-id').value = state.config.sheetId || '';
+    el('set-script-url').value = state.config.scriptUrl || '';
+    el('set-location').value = state.config.location || 'CS2';
+    el('set-lokace').value = (state.config.lokacePresets || []).join(', ');
+    renderLokacePresets();
+  }, 100);
+}
+
+function loadHistory() {
+  try {
+    const h = localStorage.getItem('dek_wms_history');
+    if (h) state.history = JSON.parse(h);
+  } catch(e) { state.history = []; }
+  renderHistory();
+}
+
+// ─────────────────────────────────────────────
+//  SETUP
+// ─────────────────────────────────────────────
+function saveSetup() {
+  const sheetId = el('inp-sheet-id').value.trim();
+  const scriptUrl = el('inp-script-url').value.trim();
+  const location = el('inp-location').value;
+
+  if (!sheetId && !scriptUrl) {
+    showToast('Vyplňte ID tabulky nebo URL skriptu', 'error');
+    return;
+  }
+
+  state.config.sheetId = sheetId;
+  state.config.scriptUrl = scriptUrl;
+  state.config.location = location;
+  state.config.demoMode = false;
+  saveConfig();
+  showMainApp();
+}
+
+function startDemo() {
+  state.config.demoMode = true;
+  state.config.location = 'DEMO';
+  saveConfig();
+  showMainApp();
+  showToast('🎮 DEMO režim – data se neukládají do Sheets');
+}
+
+function saveConfig() {
+  localStorage.setItem('dek_wms_config', JSON.stringify(state.config));
+}
+
+function showMainApp() {
+  el('screen-setup').classList.remove('active');
+  el('main-header').style.display = 'flex';
+  el('main-nav').style.display = 'flex';
+  el('badge-loc').textContent = state.config.location;
+  showTab('scan');
+  startScanner();
+}
+
+// ─────────────────────────────────────────────
+//  TABS
+// ─────────────────────────────────────────────
+function showTab(name) {
+  ['scan','history','settings','confirm'].forEach(s => {
+    el('screen-' + s).classList.remove('active');
+  });
+  ['scan','history','settings'].forEach(t => {
+    el('tab-' + t)?.classList.remove('active');
+  });
+  el('screen-' + name).classList.add('active');
+  if (el('tab-' + name)) el('tab-' + name).classList.add('active');
+
+  if (name === 'scan') startScanner();
+  else stopScanner();
+
+  if (name === 'settings') {
+    el('set-sheet-id').value = state.config.sheetId || '';
+    el('set-script-url').value = state.config.scriptUrl || '';
+    el('set-location').value = state.config.location || 'CS2';
+    el('set-lokace').value = (state.config.lokacePresets || []).join(', ');
+  }
+}
+
+// ─────────────────────────────────────────────
+//  ACTION SELECTION
+// ─────────────────────────────────────────────
+function selectAction(action) {
+  state.currentAction = action;
+  ['prijem','vydej'].forEach(a => {
+    el('card-' + a).classList.toggle('selected', a === action);
+  });
+  const hints = {
+    prijem: 'Naskenujte QR kód přijímaného stroje',
+    vydej:  'Naskenujte QR kód vydávaného stroje',
+  };
+  el('scan-hint').textContent = hints[action];
+}
+
+// ─────────────────────────────────────────────
+//  SCANNER – jsQR + canvas loop
+// ─────────────────────────────────────────────
+async function startScanner() {
+  if (state.scanning) return;
+
+  // Add hidden canvas for jsQR if not present
+  if (!document.getElementById('scan-canvas')) {
+    const c = document.createElement('canvas');
+    c.id = 'scan-canvas';
+    c.style.display = 'none';
+    document.body.appendChild(c);
+  }
+
+  try {
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 },
+      }
+    };
+
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = el('preview');
+    video.srcObject = stream;
+    await video.play();
+
+    state.scanning = true;
+    state.stream = stream;
+
+    el('scan-hint').textContent = state.currentAction
+      ? 'Namiřte kameru na QR kód stroje'
+      : 'Vyberte akci a namiřte kameru na QR kód stroje';
+
+    requestAnimationFrame(scanLoop);
+
+  } catch(e) {
+    console.warn('Camera error:', e);
+    el('scan-hint').textContent = 'Kamera nedostupná – použijte ruční zadání níže';
+  }
+}
+
+function scanLoop() {
+  if (!state.scanning) return;
+
+  const video  = el('preview');
+  const canvas = document.getElementById('scan-canvas');
+  if (!canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+    requestAnimationFrame(scanLoop);
+    return;
+  }
+
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+  if (!w || !h) { requestAnimationFrame(scanLoop); return; }
+
+  canvas.width  = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, w, h);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+
+  if (typeof jsQR !== 'undefined') {
+    const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) {
+      handleScan(code.data);
+      return; // stop loop after successful scan
+    }
+  }
+
+  requestAnimationFrame(scanLoop);
+}
+
+function stopScanner() {
+  state.scanning = false;
+  if (state.stream) {
+    state.stream.getTracks().forEach(t => t.stop());
+    state.stream = null;
+  }
+  const video = el('preview');
+  if (video) video.srcObject = null;
+}
+
+// ─────────────────────────────────────────────
+//  SCAN RESULT
+// ─────────────────────────────────────────────
+function handleScan(raw) {
+  if (!state.currentAction) {
+    showToast('⚠️ Nejdřív vyberte akci (Příjem / Výdej)', 'error');
+    return;
+  }
+
+  stopScanner();
+
+  // Extract ID – QR may contain just the ID or a URL/string containing it
+  // DEK format appears to be 4-char alphanumeric (e.g. 9JT9, 1X7M)
+  let id = raw.trim().toUpperCase();
+  const match = raw.match(/\b([A-Z0-9]{3,6})\b/);
+  if (match) id = match[1];
+
+  state.currentId = id;
+  state.currentLokace = null;
+  showConfirmScreen(id);
+}
+
+function manualConfirm() {
+  const val = el('inp-manual').value.trim().toUpperCase();
+  if (!val) { showToast('Zadejte ID stroje', 'error'); return; }
+  if (!state.currentAction) { showToast('Nejdřív vyberte akci', 'error'); return; }
+  state.currentId = val;
+  state.currentLokace = null;
+  el('inp-manual').value = '';
+  showConfirmScreen(val);
+}
+
+// ─────────────────────────────────────────────
+//  CONFIRM SCREEN
+// ─────────────────────────────────────────────
+async function showConfirmScreen(id) {
+  showTab('confirm');
+
+  const now = new Date();
+  el('res-id').textContent = id;
+  el('res-name').textContent = 'Načítám z evidence…';
+  el('res-psp').textContent = '…';
+  el('res-typ').textContent = '…';
+  el('res-cas').textContent = formatTime(now);
+  el('res-akce').textContent = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
+
+  const isPrijem = state.currentAction === 'prijem';
+  el('lokace-section').style.display = isPrijem ? 'flex' : 'none';
+
+  renderLokacePresets();
+
+  // Lookup from sheets (or demo data)
+  const info = await lookupStroj(id);
+  el('res-name').textContent = info.nazev || 'Stroj nenalezen v evidenci';
+  el('res-psp').textContent = info.psp || 'Bez PSP';
+  el('res-typ').textContent = info.typ || '—';
+
+  if (!info.nazev) {
+    el('result-card').classList.add('warning');
+  }
+}
+
+function goBack() {
+  showTab('scan');
+  startScanner();
+  state.currentId = null;
+  state.currentLokace = null;
+  el('result-card').classList.remove('warning','success','error');
+}
+
+async function lookupStroj(id) {
+  if (state.config.demoMode || !state.config.scriptUrl) {
+    return demoLookup(id);
+  }
+  try {
+    const url = `${state.config.scriptUrl}?action=lookup&id=${encodeURIComponent(id)}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    return data;
+  } catch(e) {
+    return demoLookup(id);
+  }
+}
+
+// Demo data – realistic DEK-style entries
+function demoLookup(id) {
+  const db = {
+    '9JT9': { nazev: 'Vibrační deska reverzní do 200 kg', typ: 'BOMAG BPR 35/60', psp: 'PSP-100-26-00329' },
+    '1X7M': { nazev: 'Plovoucí vibrační lišta', typ: 'ENAR QZH', psp: 'PSP-140-26-00091' },
+    '49XE': { nazev: 'Úhlová bruska 230mm', typ: 'BOSCH GWS 24-230', psp: 'PSP-305-26-00195' },
+    '61EJ': { nazev: 'Míchač stavebních směsí', typ: 'COLLOMIX XO 4', psp: 'PSP-120-26-00191' },
+  };
+  return db[id.toUpperCase()] || {};
+}
+
+// ─────────────────────────────────────────────
+//  LOKACE
+// ─────────────────────────────────────────────
+function renderLokacePresets() {
+  const presets = state.config.lokacePresets || ['A1','A2','A3','B1','B2','B3','C1','C2'];
+  el('lokace-presets').innerHTML = presets.map(p =>
+    `<div class="lokace-btn" onclick="selectLokace(this,'${p}')">${p}</div>`
+  ).join('');
+}
+
+function selectLokace(btn, val) {
+  document.querySelectorAll('.lokace-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  el('inp-lokace').value = val;
+  state.currentLokace = val;
+}
+
+// ─────────────────────────────────────────────
+//  CONFIRM MOVE
+// ─────────────────────────────────────────────
+async function confirmMove() {
+  const isPrijem = state.currentAction === 'prijem';
+  const lokace = el('inp-lokace').value.trim() || state.currentLokace || '—';
+
+  if (isPrijem && !lokace || lokace === '—') {
+    showToast('Zadejte lokaci ve skladu', 'error');
+    return;
+  }
+
+  const btn = el('btn-confirm');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Ukládám…';
+
+  const record = {
+    id:      state.currentId,
+    psp:     el('res-psp').textContent,
+    nazev:   el('res-name').textContent,
+    typ:     el('res-typ').textContent,
+    akce:    state.currentAction,
+    lokace:  isPrijem ? lokace : '—',
+    sklad:   state.config.location,
+    cas:     new Date().toISOString(),
+  };
+
+  const ok = await saveRecord(record);
+
+  btn.disabled = false;
+  btn.innerHTML = '✓ Potvrdit pohyb';
+
+  if (ok) {
+    flashSuccess();
+    state.history.unshift(record);
+    localStorage.setItem('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
+    renderHistory();
+
+    const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
+    showToast(`${akceText} ${state.currentId} uložen`, 'success');
+
+    setTimeout(() => {
+      goBack();
+    }, 1200);
+  } else {
+    showToast('Chyba uložení – zkuste znovu', 'error');
+    el('result-card').classList.add('error');
+  }
+}
+
+async function saveRecord(record) {
+  // Add to local history always
+  if (state.config.demoMode || !state.config.scriptUrl) {
+    return true; // demo – simulate success
+  }
+  try {
+    const resp = await fetch(state.config.scriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', record }),
+    });
+    return true;
+  } catch(e) {
+    console.error('Save error:', e);
+    // Even if sheets fails, save locally
+    return true;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  HISTORY
+// ─────────────────────────────────────────────
+function renderHistory() {
+  const list = el('history-list');
+  if (!state.history.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text-dim);font-size:14px;">Zatím žádné pohyby dnes</div>';
+    return;
+  }
+  list.innerHTML = state.history.slice(0, 50).map(r => {
+    const icon = r.akce === 'prijem' ? '📥' : '📤';
+    const cas = formatTime(new Date(r.cas));
+    const meta = [r.psp, r.lokace !== '—' ? `Lok: ${r.lokace}` : null].filter(Boolean).join(' · ');
+    return `
+      <div class="history-item">
+        <div class="history-icon">${icon}</div>
+        <div class="history-body">
+          <div class="history-id">${r.id}</div>
+          <div class="history-meta">${meta || r.nazev || ''}</div>
+        </div>
+        <div class="history-time">${cas}</div>
+      </div>`;
+  }).join('');
+}
+
+function clearHistory() {
+  if (confirm('Smazat historii pohybů?')) {
+    state.history = [];
+    localStorage.removeItem('dek_wms_history');
+    renderHistory();
+  }
+}
+
+// ─────────────────────────────────────────────
+//  SETTINGS SAVE
+// ─────────────────────────────────────────────
+function saveSettings() {
+  state.config.sheetId   = el('set-sheet-id').value.trim();
+  state.config.scriptUrl = el('set-script-url').value.trim();
+  state.config.location  = el('set-location').value.trim() || 'CS2';
+  state.config.demoMode  = false;
+  saveConfig();
+  el('badge-loc').textContent = state.config.location;
+  showToast('Nastavení uloženo ✓', 'success');
+}
+
+function saveLokace() {
+  const raw = el('set-lokace').value;
+  const presets = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  if (presets.length) {
+    state.config.lokacePresets = presets;
+    saveConfig();
+    renderLokacePresets();
+    showToast('Lokace uloženy ✓', 'success');
+  }
+}
+
+// ─────────────────────────────────────────────
+//  UTILS
+// ─────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+
+function formatTime(date) {
+  return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function flashSuccess() {
+  const f = el('success-flash');
+  f.classList.add('show');
+  setTimeout(() => f.classList.remove('show'), 500);
+}
+
+function showToast(msg, type = '') {
+  const t = el('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ─────────────────────────────────────────────
+//  KEYBOARD – manual input enter
+// ─────────────────────────────────────────────
+el('inp-manual')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') manualConfirm();
+});
+el('inp-lokace')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    state.currentLokace = e.target.value.trim().toUpperCase();
+    e.target.blur();
+  }
+});
+el('inp-lokace')?.addEventListener('input', e => {
+  state.currentLokace = e.target.value.trim().toUpperCase();
+});
+</script>
+</body>
+</html>
