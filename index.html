@@ -1023,30 +1023,36 @@ function scanLoop() {
   const video  = el('preview');
   const canvas = document.getElementById('scan-canvas');
   if (!canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
-    requestAnimationFrame(scanLoop);
+    setTimeout(scanLoop, 200);
     return;
   }
 
   const w = video.videoWidth;
   const h = video.videoHeight;
-  if (!w || !h) { requestAnimationFrame(scanLoop); return; }
+  if (!w || !h) { setTimeout(scanLoop, 200); return; }
 
-  canvas.width  = w;
-  canvas.height = h;
+  // Skenuj v rozlišení 640x480 max – šetří CPU
+  const scale  = Math.min(1, 640 / w);
+  const sw     = Math.round(w * scale);
+  const sh     = Math.round(h * scale);
+
+  canvas.width  = sw;
+  canvas.height = sh;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, w, h);
+  ctx.drawImage(video, 0, 0, sw, sh);
 
-  const imageData = ctx.getImageData(0, 0, w, h);
+  const imageData = ctx.getImageData(0, 0, sw, sh);
 
   if (typeof jsQR !== 'undefined') {
-    const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+    const code = jsQR(imageData.data, sw, sh, { inversionAttempts: 'dontInvert' });
     if (code && code.data) {
       handleScan(code.data);
-      return; // stop loop after successful scan
+      return; // zastav loop po úspěšném skenu
     }
   }
 
-  requestAnimationFrame(scanLoop);
+  // 5 snímků za sekundu místo 60 – 10x méně zatížení CPU
+  setTimeout(scanLoop, 200);
 }
 
 function stopScanner() {
@@ -1126,11 +1132,19 @@ async function showConfirmScreen(id) {
   // Zobraz všechny položky PSP
   if (info.polozky && info.polozky.length > 0) {
     el('psp-polozky-section').style.display = 'flex';
-    el('psp-polozky-list').innerHTML = info.polozky.map(p => `
-      <div class="result-row" style="flex-direction:column;align-items:flex-start;gap:3px;">
-        <span class="result-row-val" style="font-size:13px;">${p.nazev || '—'}</span>
-        <span class="result-row-key" style="font-size:11px;">${p.ecPuj || ''} ${p.polozka ? '· ' + p.polozka : ''}</span>
-      </div>`).join('');
+    el('psp-polozky-list').innerHTML = info.polozky.map(p => {
+      const idBadge = p.idStroje
+        ? `<span style="background:var(--red);color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;letter-spacing:1px;">${p.idStroje}</span>`
+        : '';
+      return `
+      <div class="result-row" style="flex-direction:column;align-items:flex-start;gap:4px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${idBadge}
+          <span class="result-row-val" style="font-size:13px;">${p.nazev || '—'}</span>
+        </div>
+        <span class="result-row-key" style="font-size:11px;">${p.pp || ''} ${p.polozka ? '· ' + p.polozka : ''}</span>
+      </div>`;
+    }).join('');
   }
 
   if (!info.nalezeno && !info.nazev) {
@@ -1290,7 +1304,9 @@ async function confirmMove() {
     nazev:       info.nazev       || el('res-name').textContent,
     ecPuj:       info.ecPuj       || '',
     akce:        state.currentAction,
+    idNakladka:  info.idNakladka  || '',
     pobNakladka: info.pobNakladka || '',
+    idVykladka:  info.idVykladka  || '',
     pobVykladka: info.pobVykladka || '',
     lokace:      isPrijem ? lokace : '—',
     sklad:       state.config.location,
@@ -1419,6 +1435,18 @@ function showToast(msg, type = '') {
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
+
+// ─────────────────────────────────────────────
+//  VIDITELNOST – zastav kameru při přechodu do pozadí
+// ─────────────────────────────────────────────
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopScanner();
+  } else {
+    const activeScan = el('screen-scan').classList.contains('active');
+    if (activeScan) setTimeout(startScanner, 300);
+  }
+});
 
 // ─────────────────────────────────────────────
 //  KEYBOARD – manual input enter
