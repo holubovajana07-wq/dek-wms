@@ -295,8 +295,8 @@ function getSeznamKVydeje() {
     const r = data[i];
     if (r[c.storno - 1]) continue;
 
-    const prijato  = r[wms.prijem - 1] || r[c.svezenoNaCS - 1];
-    const vydano   = r[wms.vydej - 1]  || r[c.odeslanoZCS - 1];
+    const prijato = r[wms.prijem - 1] || r[c.svezenoNaCS - 1];
+    const vydano  = r[wms.vydej - 1]  || r[c.odeslanoZCS - 1];
     if (!prijato || vydano) continue;
 
     const psp = (r[c.cisloPsp - 1] || '').toString().trim();
@@ -642,9 +642,7 @@ function testSeznamKVydeji() {
   });
 }
 
-// Porovná živý výpočet getSeznamKVydeje() se snímkem v listu LOGISTIK-výdej.
-// Slouží k ověření, že "je na skladě" počítáme stejně jako logistický přehled.
-// Rozdíly jsou očekávané (snímek se obnovuje ručně), ale mají být malé.
+// Porovná živý výpočet se snímkem v listu LOGISTIK-výdej.
 function porovnejSVydejem() {
   const ss = SpreadsheetApp.openById(getSheetId_());
   const snimek = ss.getSheetByName('LOGISTIK-výdej');
@@ -652,7 +650,6 @@ function porovnejSVydejem() {
 
   const data = snimek.getDataRange().getValues();
 
-  // Najdi řádek hlavičky a v něm sloupec "Číslo PSP"
   let radekHlavicky = -1, sloupecPsp = -1;
   for (let r = 0; r < Math.min(data.length, 6); r++) {
     for (let s = 0; s < data[r].length; s++) {
@@ -675,7 +672,7 @@ function porovnejSVydejem() {
     p.pspList.forEach(function (x) { zivy[String(x.cisloPsp).trim()] = true; });
   });
 
-  const jenZivy  = Object.keys(zivy).filter(function (p) { return !veSnimku[p]; });
+  const jenZivy   = Object.keys(zivy).filter(function (p) { return !veSnimku[p]; });
   const jenSnimek = Object.keys(veSnimku).filter(function (p) { return !zivy[p]; });
 
   Logger.log('Živý výpočet: ' + Object.keys(zivy).length + ' PSP');
@@ -686,12 +683,9 @@ function porovnejSVydejem() {
   Logger.log('');
   Logger.log('--- Vidí jen snímek (WMS je nebere jako čekající) ---');
   Logger.log(jenSnimek.length ? jenSnimek.join(', ') : '(žádné)');
-  Logger.log('');
-  Logger.log('U rozdílů si v listu DATA ověřte sloupce R, S, AE (Storno).');
 }
 
-// Pro PSP, která vidí jen snímek LOGISTIK-výdej, vypíše skutečný obsah
-// rozhodujících sloupců v DATA – ať je vidět, PROČ je WMS nebere jako čekající.
+// Pro sporná PSP vypíše skutečný obsah rozhodujících sloupců v DATA.
 function zkontrolujRozdily() {
   const ss     = SpreadsheetApp.openById(getSheetId_());
   const snimek = ss.getSheetByName('LOGISTIK-výdej');
@@ -748,7 +742,6 @@ function zkontrolujRozdily() {
   });
 }
 
-// Mapovací nástroje (ponechány pro diagnostiku struktury)
 function zmapujData() { zmapujJedenList_('DATA'); }
 
 function zmapujJedenList_(nazevListu) {
