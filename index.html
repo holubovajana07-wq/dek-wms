@@ -611,13 +611,13 @@
     </div>
 
     <div class="form-group">
-      <div class="form-label">Google Sheets – ID tabulky</div>
-      <input class="form-input" id="inp-sheet-id" type="text" placeholder="1ABC...xyz" autocomplete="off" spellcheck="false">
+      <div class="form-label">Google Apps Script – URL webové aplikace</div>
+      <input class="form-input" id="inp-script-url" type="url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" spellcheck="false">
     </div>
 
     <div class="form-group">
-      <div class="form-label">Google Apps Script – URL webové aplikace</div>
-      <input class="form-input" id="inp-script-url" type="url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" spellcheck="false">
+      <div class="form-label">Přístupový token (nepovinné)</div>
+      <input class="form-input" id="inp-token" type="text" placeholder="nechte prázdné, pokud není nastaven" autocomplete="off" spellcheck="false">
     </div>
 
     <div class="form-group">
@@ -629,8 +629,8 @@
     </div>
 
     <div class="form-note">
-      💡 Tabulka pohybů musí mít list <strong>POHYBY</strong> s hlavičkou:<br>
-      Čas | ID stroje | PSP | Akce | Lokace | Sklad | Poznámka
+      💡 URL skriptu najdete v Apps Scriptu pod <strong>Nasadit → Spravovat nasazení</strong>.<br>
+      List <strong>POHYBY</strong> si skript vytvoří sám při prvním zápisu.
     </div>
 
     <button class="btn btn-primary" onclick="saveSetup()">
@@ -793,12 +793,12 @@
     <div class="section-title">Připojení</div>
 
     <div class="form-group">
-      <div class="form-label">Google Sheets ID</div>
-      <input class="form-input" id="set-sheet-id" type="text" autocomplete="off" spellcheck="false">
-    </div>
-    <div class="form-group">
       <div class="form-label">Apps Script URL</div>
       <input class="form-input" id="set-script-url" type="url" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="form-group">
+      <div class="form-label">Přístupový token</div>
+      <input class="form-input" id="set-token" type="text" placeholder="nechte prázdné, pokud není nastaven" autocomplete="off" spellcheck="false">
     </div>
     <div class="form-group">
       <div class="form-label">Sklad / Pobočka</div>
@@ -818,7 +818,7 @@
 
     <div class="divider"></div>
     <div style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v1.0 – pilotní provoz CS2</div>
+      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v2.0 – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
     </div>
   </div>
@@ -835,8 +835,8 @@
 // ─────────────────────────────────────────────
 const state = {
   config: {
-    sheetId: '',
     scriptUrl: '',
+    token: '',            // sdílené heslo, musí souhlasit s WMS_TOKEN ve skriptu
     location: 'CS2',
     demoMode: false,
     lokacePresets: ['A1','A2','A3','B1','B2','B3','C1','C2']
@@ -844,6 +844,8 @@ const state = {
   currentAction: null,   // 'prijem' | 'vydej'
   currentId: null,
   currentLokace: null,
+  currentNonce: null,        // otisk aktuálního skenu (proti dvojímu zápisu)
+  prepsatPotvrzeno: null,    // uživatel potvrdil přepis už zapsaného času
   scanning: false,
   codeReader: null,
   history: [],
@@ -860,7 +862,10 @@ window.addEventListener('DOMContentLoaded', () => {
   if (saved) {
     try {
       const cfg = JSON.parse(saved);
-      if (cfg.sheetId || cfg.demoMode) {
+      // Přeskoč úvodní nastavení jen tehdy, když je opravdu kam zapisovat.
+      // Dřív stačilo mít uložené ID tabulky – aplikace pak naběhla bez URL
+      // skriptu a tiše jela na DEMO datech.
+      if (cfg.scriptUrl || cfg.demoMode) {
         Object.assign(state.config, cfg);
         showMainApp();
         return;
@@ -877,8 +882,8 @@ function loadConfig() {
   }
   // Populate settings fields
   setTimeout(() => {
-    el('set-sheet-id').value = state.config.sheetId || '';
     el('set-script-url').value = state.config.scriptUrl || '';
+    el('set-token').value = state.config.token || '';
     el('set-location').value = state.config.location || 'CS2';
     el('set-lokace').value = (state.config.lokacePresets || []).join(', ');
     renderLokacePresets();
@@ -897,19 +902,21 @@ function loadHistory() {
 //  SETUP
 // ─────────────────────────────────────────────
 function saveSetup() {
-  const sheetId = el('inp-sheet-id').value.trim();
   const scriptUrl = el('inp-script-url').value.trim();
-  const location = el('inp-location').value;
+  const location  = el('inp-location').value;
 
-  if (!sheetId && !scriptUrl) {
-    showToast('Vyplňte ID tabulky nebo URL skriptu', 'error');
+  // Bez URL skriptu aplikace nemá kam zapisovat. Dřív šlo pokračovat
+  // jen s ID tabulky a aplikace pak tiše běžela na DEMO datech,
+  // aniž by to kdekoli bylo vidět.
+  if (!scriptUrl) {
+    showToast('Vyplňte URL skriptu (nebo zvolte DEMO)', 'error');
     return;
   }
 
-  state.config.sheetId = sheetId;
   state.config.scriptUrl = scriptUrl;
-  state.config.location = location;
-  state.config.demoMode = false;
+  state.config.token     = el('inp-token').value.trim();
+  state.config.location  = location;
+  state.config.demoMode  = false;
   saveConfig();
   showMainApp();
 }
@@ -952,8 +959,8 @@ function showTab(name) {
   else stopScanner();
 
   if (name === 'settings') {
-    el('set-sheet-id').value = state.config.sheetId || '';
     el('set-script-url').value = state.config.scriptUrl || '';
+    el('set-token').value = state.config.token || '';
     el('set-location').value = state.config.location || 'CS2';
     el('set-lokace').value = (state.config.lokacePresets || []).join(', ');
   }
@@ -1078,9 +1085,16 @@ function handleScan(raw) {
 
   // Extract ID – QR may contain just the ID or a URL/string containing it
   // DEK format appears to be 4-char alphanumeric (e.g. 9JT9, 1X7M)
-  let id = raw.trim().toUpperCase();
-  const match = raw.match(/\b([A-Z0-9]{3,6})\b/);
-  if (match) id = match[1];
+  // ID stroje je 4znakový alfanumerický kód (9JT9, 61EJ, 1X7M).
+  // Původní verze hledala vzor v "raw" (bez převodu na velká písmena)
+  // a brala PRVNÍ 3–6znakový úsek – u kódu "DEK-9JT9" vracela "DEK".
+  const cisty = raw.trim().toUpperCase();
+  let id = cisty;
+  const kandidati = cisty.match(/\b[A-Z0-9]{4}\b/g) || [];
+  // Přednost má úsek, který obsahuje aspoň jednu číslici (ID strojů ji mají)
+  const sCislici = kandidati.filter(k => /[0-9]/.test(k));
+  if (sCislici.length)       id = sCislici[sCislici.length - 1];
+  else if (kandidati.length) id = kandidati[kandidati.length - 1];
 
   state.currentId = id;
   state.currentLokace = null;
@@ -1113,6 +1127,12 @@ async function showConfirmScreen(id) {
   el('res-akce').textContent  = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
   el('psp-polozky-section').style.display = 'none';
   el('result-card').classList.remove('warning','success','error');
+
+  // Nový sken = nový otisk a čistá lokace.
+  // Bez vyčištění by se lokace z předchozího příjmu přenesla dál.
+  state.currentNonce = null;
+  state.prepsatPotvrzeno = null;
+  el('inp-lokace').value = '';
 
   const isPrijem = state.currentAction === 'prijem';
   el('lokace-section').style.display = isPrijem ? 'flex' : 'none';
@@ -1147,7 +1167,19 @@ async function showConfirmScreen(id) {
     }).join('');
   }
 
-  if (!info.nalezeno && !info.nazev) {
+  // Spojení se skriptem selhalo – neschovávej to, skladník to musí vidět
+  if (info.chyba) {
+    el('result-card').classList.add('error');
+    el('res-name').textContent = 'CHYBA: ' + info.chyba;
+    showToast('❌ ' + info.chyba, 'error');
+    return;
+  }
+
+  // Skript hlásí, že tenhle pohyb už proběhl (nebo chybí příjem před výdejem)
+  if (info.varovani) {
+    el('result-card').classList.add('warning');
+    showToast('⚠️ ' + info.varovani, 'error');
+  } else if (!info.nalezeno && !info.nazev) {
     el('result-card').classList.add('warning');
   }
 }
@@ -1160,38 +1192,27 @@ function goBack() {
   el('result-card').classList.remove('warning','success','error');
 }
 
-async function lookupStroj(id) {
-  if (state.config.demoMode || !state.config.scriptUrl) {
-    return demoLookup(id);
-  }
-
-  // Pokus 1: přímý fetch (funguje pokud Apps Script povolí CORS)
-  try {
-    const url = state.config.scriptUrl
-      + '?action=lookup'
-      + '&id=' + encodeURIComponent(id);
-    const resp = await fetch(url, { redirect: 'follow' });
-    const text = await resp.text();
-    // Apps Script někdy vrátí HTML chybovou stránku – zkontroluj
-    if (text.trim().startsWith('{')) {
-      const data = JSON.parse(text);
-      if (data && (data.nalezeno !== undefined || data.chyba)) {
-        return data;
-      }
-    }
-  } catch(e) {
-    console.warn('Fetch failed, zkouším JSONP:', e.message);
-  }
-
-  // Pokus 2: JSONP
+// ─────────────────────────────────────────────
+//  KOMUNIKACE SE SKRIPTEM – JSONP
+// ─────────────────────────────────────────────
+// fetch() tu nepoužíváme: Apps Script neposílá CORS hlavičky,
+// takže z prohlížeče spolehlivě funguje jen JSONP přes GET.
+// Každý požadavek nese parametr "_" s časem, aby ho prohlížeč
+// nevytáhl z cache místo skutečného volání.
+function jsonp(params, timeoutMs) {
   return new Promise((resolve) => {
-    const callbackName = 'cb' + Date.now();
+    if (!state.config.scriptUrl) {
+      resolve({ chyba: 'Není nastavena URL skriptu' });
+      return;
+    }
+
+    const callbackName = 'cb' + Date.now() + Math.floor(Math.random() * 1000);
     const script = document.createElement('script');
 
     const timeout = setTimeout(() => {
       cleanup();
-      resolve({ nalezeno: false, zprava: 'Timeout – zkontroluj URL skriptu' });
-    }, 10000);
+      resolve({ chyba: 'Vypršel časový limit – zkontrolujte připojení' });
+    }, timeoutMs || 15000);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -1201,21 +1222,32 @@ async function lookupStroj(id) {
 
     window[callbackName] = function(data) {
       cleanup();
-      resolve(data);
+      resolve(data || { chyba: 'Prázdná odpověď ze skriptu' });
     };
 
-    const url = state.config.scriptUrl
-      + '?action=lookup'
-      + '&id=' + encodeURIComponent(id)
-      + '&callback=' + callbackName;
+    const vse = Object.assign({}, params, { callback: callbackName, _: Date.now() });
+    if (state.config.token) vse.token = state.config.token;
 
-    script.src = url;
+    const qs = Object.keys(vse)
+      .filter(k => vse[k] !== undefined && vse[k] !== null && vse[k] !== '')
+      .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(vse[k]))
+      .join('&');
+
+    script.src = state.config.scriptUrl + '?' + qs;
     script.onerror = () => {
       cleanup();
-      resolve({ nalezeno: false, zprava: 'Chyba připojení ke skriptu' });
+      resolve({ chyba: 'Nepodařilo se spojit se skriptem' });
     };
     document.head.appendChild(script);
   });
+}
+
+async function lookupStroj(id) {
+  if (state.config.demoMode || !state.config.scriptUrl) {
+    return demoLookup(id);
+  }
+  // akce posíláme s sebou – skript podle ní vybere správný přesun
+  return jsonp({ action: 'lookup', id: id, akce: state.currentAction || '' });
 }
 
 // Demo data – realistic DEK-style entries matching real API structure
@@ -1288,7 +1320,9 @@ async function confirmMove() {
   const isPrijem = state.currentAction === 'prijem';
   const lokace = el('inp-lokace').value.trim() || state.currentLokace || '—';
 
-  if (isPrijem && !lokace || lokace === '—') {
+  // POZOR na závorky: bez nich se podmínka čte jako
+  // (isPrijem && !lokace) || (lokace === '—') a blokovala i výdej.
+  if (isPrijem && (!lokace || lokace === '—')) {
     showToast('Zadejte lokaci ve skladu', 'error');
     return;
   }
@@ -1298,6 +1332,14 @@ async function confirmMove() {
   btn.innerHTML = '<span class="spinner"></span> Ukládám…';
 
   const info = state.currentInfo || {};
+
+  // Nonce = otisk tohoto konkrétního skenu. Když se kvůli výpadku
+  // signálu odešle požadavek dvakrát, skript pozná duplicitu
+  // a nezapíše záznam podruhé.
+  if (!state.currentNonce) {
+    state.currentNonce = (state.currentId || 'x') + '-' + state.currentAction + '-' + Date.now();
+  }
+
   const record = {
     id:          state.currentId,
     psp:         info.cisloPsp    || el('res-psp').textContent,
@@ -1311,49 +1353,78 @@ async function confirmMove() {
     lokace:      isPrijem ? lokace : '—',
     sklad:       state.config.location,
     cas:         new Date().toISOString(),
+    nonce:       state.currentNonce,
+    prepsat:     state.prepsatPotvrzeno === state.currentNonce,
   };
 
-  const ok = await saveRecord(record);
+  const odpoved = await saveRecord(record) || {};
 
   btn.disabled = false;
   btn.innerHTML = '✓ Potvrdit pohyb';
 
-  if (ok) {
-    flashSuccess();
-    state.history.unshift(record);
-    localStorage.setItem('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
-    renderHistory();
-
-    const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
-    showToast(`${akceText} ${state.currentId} uložen`, 'success');
-
-    setTimeout(() => {
-      goBack();
-    }, 1200);
-  } else {
-    showToast('Chyba uložení – zkuste znovu', 'error');
-    el('result-card').classList.add('error');
+  // Skript hlásí, že čas už je zapsaný – zeptej se, jestli přepsat
+  if (odpoved.jizZapsano) {
+    el('result-card').classList.remove('success','error');
+    el('result-card').classList.add('warning');
+    const chce = confirm(
+      (odpoved.zprava || 'Tento pohyb už byl zapsán') +
+      '.\n\nChcete čas přepsat na aktuální?'
+    );
+    if (chce) {
+      state.currentNonce = state.currentNonce + '-p';  // nový otisk pro přepis
+      state.prepsatPotvrzeno = state.currentNonce;
+      return confirmMove();
+    }
+    showToast('Ponecháno beze změny');
+    return;
   }
+
+  if (!odpoved.ok) {
+    // Skutečná chyba – řekni to nahlas a NEDĚLEJ, že je uloženo
+    el('result-card').classList.remove('success','warning');
+    el('result-card').classList.add('error');
+    showToast('❌ NEULOŽENO: ' + (odpoved.chyba || 'neznámá chyba'), 'error');
+    return;
+  }
+
+  flashSuccess();
+  state.history.unshift(record);
+  localStorage.setItem('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
+  renderHistory();
+
+  const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
+  showToast(`${akceText} ${state.currentId} uložen`, 'success');
+
+  setTimeout(() => {
+    goBack();
+  }, 1200);
 }
 
+// DŮLEŽITÉ: tahle funkce musí vracet PRAVDU.
+// Původní verze vracela úspěch vždycky – i když se nic neuložilo –
+// takže skladník viděl "uloženo" a v tabulce nebylo nic.
+// Odpověď ze skriptu se přes POST + no-cors nedá přečíst,
+// proto ukládáme přes GET (JSONP), kde odpověď dostaneme.
 async function saveRecord(record) {
-  // Add to local history always
   if (state.config.demoMode || !state.config.scriptUrl) {
-    return true; // demo – simulate success
+    return { ok: true, demo: true };
   }
-  try {
-    const resp = await fetch(state.config.scriptUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save', record }),
-    });
-    return true;
-  } catch(e) {
-    console.error('Save error:', e);
-    // Even if sheets fails, save locally
-    return true;
-  }
+  return jsonp({
+    action:      'save',
+    id:          record.id,
+    psp:         record.psp,
+    nazev:       record.nazev,
+    akce:        record.akce,
+    idNakladka:  record.idNakladka,
+    pobNakladka: record.pobNakladka,
+    idVykladka:  record.idVykladka,
+    pobVykladka: record.pobVykladka,
+    lokace:      record.lokace,
+    sklad:       record.sklad,
+    cas:         record.cas,
+    nonce:       record.nonce,
+    prepsat:     record.prepsat ? '1' : '',
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -1361,11 +1432,19 @@ async function saveRecord(record) {
 // ─────────────────────────────────────────────
 function renderHistory() {
   const list = el('history-list');
-  if (!state.history.length) {
+
+  // Obrazovka se jmenuje "Dnešní pohyby" – tak ukazuj opravdu jen dnešek.
+  // Původně se zobrazovalo posledních 100 záznamů včetně minulých dnů.
+  const dnes = new Date().toDateString();
+  const dnesni = state.history.filter(r => {
+    try { return new Date(r.cas).toDateString() === dnes; } catch(e) { return false; }
+  });
+
+  if (!dnesni.length) {
     list.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text-dim);font-size:14px;">Zatím žádné pohyby dnes</div>';
     return;
   }
-  list.innerHTML = state.history.slice(0, 50).map(r => {
+  list.innerHTML = dnesni.slice(0, 50).map(r => {
     const icon = r.akce === 'prijem' ? '📥' : '📤';
     const cas = formatTime(new Date(r.cas));
     const meta = [r.psp, r.lokace !== '—' ? `Lok: ${r.lokace}` : null].filter(Boolean).join(' · ');
@@ -1392,14 +1471,23 @@ function clearHistory() {
 // ─────────────────────────────────────────────
 //  SETTINGS SAVE
 // ─────────────────────────────────────────────
-function saveSettings() {
-  state.config.sheetId   = el('set-sheet-id').value.trim();
+async function saveSettings() {
   state.config.scriptUrl = el('set-script-url').value.trim();
+  state.config.token     = el('set-token').value.trim();
   state.config.location  = el('set-location').value.trim() || 'CS2';
   state.config.demoMode  = false;
   saveConfig();
   el('badge-loc').textContent = state.config.location;
-  showToast('Nastavení uloženo ✓', 'success');
+
+  // Rovnou ověř, že skript odpovídá – ať se chyba pozná tady
+  // a ne až uprostřed příjmu ve skladu.
+  showToast('Ověřuji spojení…');
+  const test = await jsonp({ action: 'ping' }, 10000);
+  if (test && test.ok) {
+    showToast('Nastavení uloženo, skript odpovídá ✓', 'success');
+  } else {
+    showToast('⚠️ Uloženo, ale skript neodpovídá: ' + (test.chyba || 'bez odpovědi'), 'error');
+  }
 }
 
 function saveLokace() {
@@ -1462,6 +1550,40 @@ el('inp-lokace')?.addEventListener('keydown', e => {
 });
 el('inp-lokace')?.addEventListener('input', e => {
   state.currentLokace = e.target.value.trim().toUpperCase();
+});
+
+// ─────────────────────────────────────────────
+//  LASEROVÝ SKENER (HID) – Urovo DT66 a podobné
+// ─────────────────────────────────────────────
+// Skener se chová jako klávesnice: rychle "napíše" načtený kód
+// a stiskne Enter. Nemusí být aktivní žádné vstupní pole –
+// znaky odchytáváme globálně. Člověk tak rychle psát nedokáže,
+// proto se buffer po 300 ms nečinnosti zahodí.
+let hidBuffer = '';
+let hidTimer  = null;
+
+document.addEventListener('keydown', e => {
+  // Když uživatel píše do pole, nech ho psát
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (e.key === 'Enter') {
+    if (hidBuffer.length >= 3) {
+      const nacteno = hidBuffer;
+      hidBuffer = '';
+      clearTimeout(hidTimer);
+      if (el('screen-scan').classList.contains('active')) {
+        handleScan(nacteno);
+      }
+    }
+    return;
+  }
+
+  if (e.key.length === 1) {
+    hidBuffer += e.key;
+    clearTimeout(hidTimer);
+    hidTimer = setTimeout(() => { hidBuffer = ''; }, 300);
+  }
 });
 </script>
 </body>

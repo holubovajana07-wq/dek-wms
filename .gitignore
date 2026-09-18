@@ -1,0 +1,21 @@
+# Windows / OneDrive smetí
+desktop.ini
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+*.lnk
+
+# Dočasné soubory Office
+~$*
+
+# Editory
+.vscode/
+.idea/
+*.swp
+
+# NIKDY do repozitáře – repozitář je veřejný
+*.csv
+*.xlsx
+tajne*
+*secret*
+*token*
