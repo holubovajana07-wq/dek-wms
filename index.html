@@ -355,6 +355,29 @@
       border-radius: var(--radius-lg);
       padding: 20px;
     }
+    /* ── TRVALÉ VAROVÁNÍ ── */
+    /* Zůstává na obrazovce, dokud skladník neodejde jinam.
+       Bublina (toast) se po pár sekundách ztratí a ve skladu ji nikdo nestihne. */
+    .varovani {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(243,156,18,0.18);
+      border: 2px solid var(--amber);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: #ffd89b;
+    }
+    .varovani.chyba {
+      background: rgba(200,40,26,0.18);
+      border-color: var(--red);
+      color: #ffb3ab;
+    }
+    .varovani-ikona { font-size: 28px; flex-shrink: 0; }
+
     .result-card.success { border-color: var(--green); }
     .result-card.error   { border-color: var(--red); }
     .result-card.warning { border-color: var(--amber); }
@@ -699,6 +722,11 @@
 
   <!-- CONFIRM SCREEN -->
   <div id="screen-confirm" class="screen">
+
+    <div class="varovani" id="varovani-box" style="display:none;">
+      <span class="varovani-ikona" id="varovani-ikona">⚠️</span>
+      <span id="varovani-text"></span>
+    </div>
 
     <div class="result-card" id="result-card">
       <div class="result-label">Naskenovaný stroj</div>
@@ -1127,6 +1155,7 @@ async function showConfirmScreen(id) {
   el('res-akce').textContent  = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
   el('psp-polozky-section').style.display = 'none';
   el('result-card').classList.remove('warning','success','error');
+  skryjVarovani();
 
   // Nový sken = nový otisk a čistá lokace.
   // Bez vyčištění by se lokace z předchozího příjmu přenesla dál.
@@ -1171,17 +1200,31 @@ async function showConfirmScreen(id) {
   if (info.chyba) {
     el('result-card').classList.add('error');
     el('res-name').textContent = 'CHYBA: ' + info.chyba;
-    showToast('❌ ' + info.chyba, 'error');
+    zobrazVarovani(info.chyba, true);
     return;
   }
 
-  // Skript hlásí, že tenhle pohyb už proběhl (nebo chybí příjem před výdejem)
+  // Skript hlásí, že tenhle pohyb už proběhl (nebo chybí příjem před výdejem).
+  // Zobrazuje se jako trvalý pruh, ne jako mizející bublina.
   if (info.varovani) {
     el('result-card').classList.add('warning');
-    showToast('⚠️ ' + info.varovani, 'error');
+    zobrazVarovani(info.varovani, false);
   } else if (!info.nalezeno && !info.nazev) {
     el('result-card').classList.add('warning');
+    zobrazVarovani('Stroj nenalezen v databázi PSP', true);
   }
+}
+
+function zobrazVarovani(text, jeChyba) {
+  const box = el('varovani-box');
+  el('varovani-text').textContent = text;
+  el('varovani-ikona').textContent = jeChyba ? '⛔' : '⚠️';
+  box.classList.toggle('chyba', !!jeChyba);
+  box.style.display = 'flex';
+}
+
+function skryjVarovani() {
+  el('varovani-box').style.display = 'none';
 }
 
 function goBack() {
@@ -1380,10 +1423,12 @@ async function confirmMove() {
   }
 
   if (!odpoved.ok) {
-    // Skutečná chyba – řekni to nahlas a NEDĚLEJ, že je uloženo
+    // Skutečná chyba – řekni to nahlas a NEDĚLEJ, že je uloženo.
+    // Trvalý pruh, ne bublina: tohle si skladník musí přečíst.
     el('result-card').classList.remove('success','warning');
     el('result-card').classList.add('error');
-    showToast('❌ NEULOŽENO: ' + (odpoved.chyba || 'neznámá chyba'), 'error');
+    zobrazVarovani('NEULOŽENO – ' + (odpoved.chyba || 'neznámá chyba'), true);
+    showToast('❌ Neuloženo', 'error');
     return;
   }
 
