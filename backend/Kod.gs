@@ -49,9 +49,42 @@ function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('WMS_TOKEN') || '';
 }
 
+// Otevření tabulky není zadarmo – u téhle (20 listů, 1,25 MB) trvá skoro
+// vteřinu. V rámci jednoho požadavku si ji proto pamatujeme a neotevíráme
+// ji znovu při každém volání. Totéž pro listy a pro pozice sloupců WMS.
+let _ss = null;
+const _listy = {};
+let _wmsSloupce = null;
+
+function getSS_() {
+  if (!_ss) _ss = SpreadsheetApp.openById(getSheetId_());
+  return _ss;
+}
+
+// Zahodí zapamatované hodnoty – používá se jen při měření rychlosti,
+// aby každé měření začínalo nastudena jako skutečný požadavek ze čtečky.
+function zapomen_() {
+  _ss = null;
+  _wmsSloupce = null;
+  for (const k in _listy) delete _listy[k];
+}
+
+// Volitelné měření uvnitř funkcí. Když je _mereni null (běžný provoz),
+// tik_ nedělá vůbec nic, takže to nic nestojí.
+let _mereni = null;
+
+function tik_(co) {
+  if (!_mereni) return;
+  const t = Date.now();
+  _mereni.log.push('   ' + co + ': ' + (t - _mereni.t) + ' ms');
+  _mereni.t = t;
+}
+
 function getList_(nazev) {
-  const sheet = SpreadsheetApp.openById(getSheetId_()).getSheetByName(nazev);
+  if (_listy[nazev]) return _listy[nazev];
+  const sheet = getSS_().getSheetByName(nazev);
   if (!sheet) throw new Error('List "' + nazev + '" nenalezen');
+  _listy[nazev] = sheet;
   return sheet;
 }
 
@@ -59,7 +92,24 @@ function getList_(nazev) {
 // SLOUPCE WMS – najdi je, nebo je založ na konci listu
 // ============================================================
 function wmsSloupce_(sheet) {
-  const sirka    = Math.max(sheet.getLastColumn(), 1);
+  if (_wmsSloupce) return _wmsSloupce;
+
+  const props = PropertiesService.getScriptProperties();
+  const sirka = Math.max(sheet.getLastColumn(), 1);
+
+  // Pozice sloupců se nemění, takže si je pamatujeme i mezi požadavky
+  // a nemusíme kvůli nim číst hlavičku. Součástí zápisu je i počet sloupců –
+  // jakmile někdo sloupec přidá nebo ubere, hodnota přestane sedět
+  // a pozice se najdou znovu.
+  const ulozeno = props.getProperty('WMS_COL_CACHE');
+  if (ulozeno) {
+    const p = ulozeno.split(',').map(Number);
+    if (p.length === 3 && p[2] === sirka && p[0] > 0 && p[1] > 0) {
+      _wmsSloupce = { prijem: p[0], vydej: p[1] };
+      return _wmsSloupce;
+    }
+  }
+
   const hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0];
 
   function najdi(nazev) {
@@ -90,7 +140,10 @@ function wmsSloupce_(sheet) {
     Logger.log('Založeny sloupce WMS: příjem=' + pismenoSloupce_(prijem) + ', výdej=' + pismenoSloupce_(vydej));
   }
 
-  return { prijem: prijem, vydej: vydej };
+  _wmsSloupce = { prijem: prijem, vydej: vydej };
+  props.setProperty('WMS_COL_CACHE',
+    prijem + ',' + vydej + ',' + Math.max(sheet.getLastColumn(), 1));
+  return _wmsSloupce;
 }
 
 // ============================================================
@@ -173,27 +226,129 @@ function doPost(e) {
 }
 
 // ============================================================
+// RYCHLÉ ČTENÍ
+// ============================================================
+// Klíčové zjištění: každý dotaz do Sheets stojí ~0,25 s sám o sobě,
+// nezávisle na množství dat. Dvacet malých dotazů je tedy pomalejší
+// než jeden velký. Proto čteme VŽDY jen pár bloků sloupců naráz
+// a nikdy nečteme řádky jeden po druhém.
+//
+// Druhé zrychlení: nové přesuny přibývají na KONEC tabulky, takže
+// při hledání stroje stačí projít poslední část. Když se tam nenajde,
+// teprve pak se sáhne na celou tabulku.
+
+// Měření na ostrých datech: čtení 1 500 řádků trvá ~750 ms, čtení 7 500 řádků
+// ~2 100 ms, přestože jde o srovnatelný počet buněk. Rozhoduje délka úseku.
+// Proto hledáme po stupních – drtivá většina skenů se trefí hned v prvním.
+const OKNA_RADKU = [400, 2000];
+
+// Načte DVA bloky sloupců pro rozsah řádků odRadku..odRadku+pocet-1.
+// Dva souvislé bloky jsou rychlejší než čtyři užší – režie dotazu
+// převáží nad pár sloupci navíc.
+function nactiBloky_(sheet, wms, odRadku, pocet) {
+  const c = WMS_CONFIG.col;
+  const A_OD = c.idNakladka;   // B
+  const A_DO = c.odeslanoZCS;  // S
+  const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
+  const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
+
+  const hlavni = sheet.getRange(odRadku, A_OD, pocet, A_DO - A_OD + 1).getValues();
+  const stavy  = sheet.getRange(odRadku, B_OD, pocet, B_DO - B_OD + 1).getValues();
+
+  return {
+    odRadku: odRadku,
+    pocet:   pocet,
+    get: function (i, sloupec) {
+      if (sloupec >= A_OD && sloupec <= A_DO) return hlavni[i][sloupec - A_OD];
+      if (sloupec >= B_OD && sloupec <= B_DO) return stavy[i][sloupec - B_OD];
+      return '';
+    }
+  };
+}
+
+// Hledá po stupních od konce tabulky: nejdřív posledních 400 řádků,
+// pak 2 000 a teprve nakonec celou tabulku. Nové přesuny přibývají na konec,
+// takže běžný sken skončí hned v prvním kroku.
+function najdiSBlokem_(sheet, wms, jeToOno) {
+  const posledni = sheet.getLastRow();
+  if (posledni < 2) return null;
+
+  const meze = OKNA_RADKU.concat([posledni - 1]);
+  let predchozi = 0;
+
+  for (let k = 0; k < meze.length; k++) {
+    const oknoRadku = Math.min(meze[k], posledni - 1);
+    if (oknoRadku <= predchozi) continue;       // stejný rozsah už prohledaný
+    predchozi = oknoRadku;
+
+    const odRadku = Math.max(2, posledni - oknoRadku + 1);
+    const b = nactiBloky_(sheet, wms, odRadku, posledni - odRadku + 1);
+    tik_('  ↳ čtení okna ' + (posledni - odRadku + 1) + ' řádků');
+    const nalezene = projdiBlok_(b, jeToOno);
+    if (nalezene.length) return { bloky: b, indexy: nalezene };
+    tik_('  ↳ v tomto okně nenalezeno, jde se šíř');
+
+    if (odRadku <= 2) break;                    // víc už není kde hledat
+  }
+  return null;
+}
+
+function projdiBlok_(b, jeToOno) {
+  const out = [];
+  for (let i = b.pocet - 1; i >= 0; i--) {   // od nejnovějšího
+    if (jeToOno(b, i)) out.push(i);
+  }
+  return out;
+}
+
+function precistZBloku_(b, i, wms) {
+  const c = WMS_CONFIG.col;
+  return {
+    radek:       b.odRadku + i,
+    idNakladka:  b.get(i, c.idNakladka),
+    pobNakladka: b.get(i, c.pobNakladka),
+    idVykladka:  b.get(i, c.idVykladka),
+    pobVykladka: b.get(i, c.pobVykladka),
+    cisloPsp:    b.get(i, c.cisloPsp),
+    ecPuj:       b.get(i, c.ecPuj),
+    polozka:     b.get(i, c.polozka),
+    idStroje:    b.get(i, c.idStroje),
+    nazev:       b.get(i, c.nazevPolozky),
+    datumSvozu:  b.get(i, c.datumSvozu),
+    svezenoNaCS: b.get(i, c.svezenoNaCS),
+    odeslanoZCS: b.get(i, c.odeslanoZCS),
+    storno:      b.get(i, c.storno),
+    wmsPrijem:   b.get(i, wms.prijem),
+    wmsVydej:    b.get(i, wms.vydej),
+  };
+}
+
+// ============================================================
 // LOOKUP – vyhledá stroj podle ID
 // ============================================================
 function lookupStroj(id, akce) {
   if (!id) return { chyba: 'Chybí ID stroje' };
 
   const sheet = getList_(WMS_CONFIG.dataList);
+  tik_('otevření tabulky a listu');
   const wms   = wmsSloupce_(sheet);
-  const data  = sheet.getDataRange().getValues();
+  tik_('zjištění sloupců WMS');
   const c     = WMS_CONFIG.col;
   const hledane = id.toString().trim().toUpperCase();
 
-  // Od konce – radky[0] je nejnovější záznam
-  const radky = [];
-  for (let i = data.length - 1; i >= 1; i--) {
-    const radId = (data[i][c.idStroje - 1] || '').toString().trim().toUpperCase();
-    if (radId === hledane) radky.push(precistRadek_(data[i], i + 1, wms));
-  }
+  const nalez = najdiSBlokem_(sheet, wms, function (b, i) {
+    return String(b.get(i, c.idStroje) || '').trim().toUpperCase() === hledane;
+  });
+  tik_('vyhledání stroje CELKEM');
 
-  if (radky.length === 0) {
+  if (!nalez) {
     return { nalezeno: false, id: hledane, zprava: 'Stroj nenalezen v databázi PSP' };
   }
+
+  // indexy jsou od nejnovějšího, takže radky[0] je nejnovější záznam
+  const b = nalez.bloky;
+  const radky = nalez.indexy.map(function (i) { return precistZBloku_(b, i, wms); });
+  tik_('načtení ' + radky.length + ' záznamů stroje');
 
   // Vyber přesun, který odpovídá akci
   let hlavni = null;
@@ -205,7 +360,8 @@ function lookupStroj(id, akce) {
   }
   if (!hlavni) hlavni = radky[0];
 
-  const polozky = najdiPolozkyPsp_(data, hlavni.cisloPsp, wms);
+  const polozky = najdiPolozkyZBloku_(b, hlavni.cisloPsp);
+  tik_('dohledání položek PSP');
 
   const vysledek = {
     nalezeno:     true,
@@ -248,20 +404,19 @@ function lookupPsp(psp) {
 
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
-  const data  = sheet.getDataRange().getValues();
   const c     = WMS_CONFIG.col;
   const hledane = psp.toString().trim().toUpperCase();
 
-  const polozky = [];
-  let hlavni = null;
+  const nalez = najdiSBlokem_(sheet, wms, function (b, i) {
+    return String(b.get(i, c.cisloPsp) || '').trim().toUpperCase() === hledane;
+  });
+  if (!nalez) return { nalezeno: false, psp: hledane, zprava: 'PSP nenalezeno v databázi' };
 
-  for (let i = 1; i < data.length; i++) {
-    const radPsp = (data[i][c.cisloPsp - 1] || '').toString().trim().toUpperCase();
-    if (radPsp !== hledane) continue;
-    const r = precistRadek_(data[i], i + 1, wms);
-    polozky.push(r);
-    if (!hlavni) hlavni = r;
-  }
+  const b = nalez.bloky;
+  const polozky = nalez.indexy
+    .slice().reverse()                       // zpět do pořadí, v jakém jsou v tabulce
+    .map(function (i) { return precistZBloku_(b, i, wms); });
+  const hlavni = polozky[0];
 
   if (!hlavni) return { nalezeno: false, psp: hledane, zprava: 'PSP nenalezeno v databázi' };
 
@@ -286,34 +441,49 @@ function lookupPsp(psp) {
 function getSeznamKVydeje() {
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
-  const data  = sheet.getDataRange().getValues();
   const c     = WMS_CONFIG.col;
+  const n     = sheet.getLastRow() - 1;
+  if (n < 1) return { ok: true, pobocky: [], celkemPsp: 0 };
+
+  // Místo celé tabulky čteme dva bloky sloupců, které opravdu potřebujeme:
+  //   D..S  (pobočky, PSP, ID stroje, název, data svozu a odeslání)
+  //   AE..  (storno a sloupce WMS)
+  const A_OD = c.idVykladka;                 // 4
+  const A_DO = c.odeslanoZCS;                // 19
+  const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
+  const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
+
+  const blokA = sheet.getRange(2, A_OD, n, A_DO - A_OD + 1).getValues();
+  const blokB = sheet.getRange(2, B_OD, n, B_DO - B_OD + 1).getValues();
+
+  const a = function (radek, sloupec) { return radek[sloupec - A_OD]; };
+  const b = function (radek, sloupec) { return radek[sloupec - B_OD]; };
 
   const pobocky = {};
 
-  for (let i = 1; i < data.length; i++) {
-    const r = data[i];
-    if (r[c.storno - 1]) continue;
+  for (let i = 0; i < n; i++) {
+    const rA = blokA[i], rB = blokB[i];
+    if (b(rB, c.storno)) continue;
 
-    const prijato = r[wms.prijem - 1] || r[c.svezenoNaCS - 1];
-    const vydano  = r[wms.vydej - 1]  || r[c.odeslanoZCS - 1];
+    const prijato = b(rB, wms.prijem) || a(rA, c.svezenoNaCS);
+    const vydano  = b(rB, wms.vydej)  || a(rA, c.odeslanoZCS);
     if (!prijato || vydano) continue;
 
-    const psp = (r[c.cisloPsp - 1] || '').toString().trim();
+    const psp = (a(rA, c.cisloPsp) || '').toString().trim();
     if (!psp) continue;
 
-    const kod   = (r[c.idVykladka - 1]  || '').toString().trim() || '???';
-    const nazev = (r[c.pobVykladka - 1] || '').toString().trim() || 'Neznámá pobočka';
+    const kod   = (a(rA, c.idVykladka)  || '').toString().trim() || '???';
+    const nazev = (a(rA, c.pobVykladka) || '').toString().trim() || 'Neznámá pobočka';
 
     if (!pobocky[kod]) pobocky[kod] = { kod: kod, nazev: nazev, psp: {} };
     if (!pobocky[kod].psp[psp]) {
       pobocky[kod].psp[psp] = { cisloPsp: psp, datumPrijmu: naIso_(prijato), polozky: [] };
     }
     pobocky[kod].psp[psp].polozky.push({
-      radek:    i + 1,
-      idStroje: r[c.idStroje - 1],
-      nazev:    r[c.nazevPolozky - 1],
-      ecPuj:    r[c.ecPuj - 1],
+      radek:    i + 2,
+      idStroje: a(rA, c.idStroje),
+      nazev:    a(rA, c.nazevPolozky),
+      ecPuj:    a(rA, c.ecPuj),
     });
   }
 
@@ -328,47 +498,23 @@ function getSeznamKVydeje() {
   return { ok: true, pobocky: out, celkemPsp: out.reduce(function (s, p) { return s + p.pocetPsp; }, 0) };
 }
 
-// ============================================================
-// POMOCNÉ ČTENÍ ŘÁDKU
-// ============================================================
-function precistRadek_(radek, cisloRadku, wms) {
-  const c = WMS_CONFIG.col;
-  return {
-    radek:       cisloRadku,
-    idNakladka:  radek[c.idNakladka   - 1],
-    pobNakladka: radek[c.pobNakladka  - 1],
-    idVykladka:  radek[c.idVykladka   - 1],
-    pobVykladka: radek[c.pobVykladka  - 1],
-    cisloPsp:    radek[c.cisloPsp     - 1],
-    ecPuj:       radek[c.ecPuj        - 1],
-    polozka:     radek[c.polozka      - 1],
-    idStroje:    radek[c.idStroje     - 1],
-    nazev:       radek[c.nazevPolozky - 1],
-    datumSvozu:  radek[c.datumSvozu   - 1],
-    svezenoNaCS: radek[c.svezenoNaCS  - 1],
-    odeslanoZCS: radek[c.odeslanoZCS  - 1],
-    storno:      radek[c.storno       - 1],
-    wmsPrijem:   radek[wms.prijem     - 1],
-    wmsVydej:    radek[wms.vydej      - 1],
-  };
-}
-
-function najdiPolozkyPsp_(data, psp, wms) {
+// Položky jednoho PSP – hledají se v už načteném bloku, tedy zadarmo.
+// Řádky jednoho PSP se do tabulky importují společně, takže leží vedle sebe.
+function najdiPolozkyZBloku_(b, psp) {
   const c = WMS_CONFIG.col;
   const hledane = (psp || '').toString().trim().toUpperCase();
   if (!hledane) return [];
 
   const out = [];
-  for (let i = 1; i < data.length; i++) {
-    const radPsp = (data[i][c.cisloPsp - 1] || '').toString().trim().toUpperCase();
-    if (radPsp !== hledane) continue;
+  for (let i = 0; i < b.pocet; i++) {
+    if (String(b.get(i, c.cisloPsp) || '').trim().toUpperCase() !== hledane) continue;
     out.push({
-      radek:    i + 1,
-      idStroje: data[i][c.idStroje     - 1],
-      pp:       data[i][c.polozka      - 1],
-      polozka:  data[i][c.ecPuj        - 1],
-      nazev:    data[i][c.nazevPolozky - 1],
-      ecPuj:    data[i][c.ecPuj        - 1],
+      radek:    b.odRadku + i,
+      idStroje: b.get(i, c.idStroje),
+      pp:       b.get(i, c.polozka),
+      polozka:  b.get(i, c.ecPuj),
+      nazev:    b.get(i, c.nazevPolozky),
+      ecPuj:    b.get(i, c.ecPuj),
     });
   }
   return out;
@@ -439,21 +585,27 @@ function ulozPohyb(record) {
 function zapisCas_(psp, idStroje, akce, cas, prepsat) {
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
-  const data  = sheet.getDataRange().getValues();
   const c     = WMS_CONFIG.col;
 
   const sloupec    = (akce === 'prijem') ? wms.prijem : wms.vydej;
   const hledanePsp = (psp || '').toString().trim().toUpperCase();
   const hledanyId  = (idStroje || '').toString().trim().toUpperCase();
 
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) return { zapsanoRadku: 0, jizZapsano: false };
+
+  // Dvě čtení: blok F..I pokryje číslo PSP i ID stroje, druhé je cílový sloupec
+  const blok   = sheet.getRange(2, c.cisloPsp, n, c.idStroje - c.cisloPsp + 1).getValues();
+  const cilCol = sheet.getRange(2, sloupec, n, 1).getValues();
+  const POSUN_ID = c.idStroje - c.cisloPsp;
+
   const cileRadky = [];
   let existujiciCas = null;
 
-  for (let i = 1; i < data.length; i++) {
-    const radPsp = (data[i][c.cisloPsp - 1] || '').toString().trim().toUpperCase();
-    if (radPsp !== hledanePsp) continue;
+  for (let i = 0; i < n; i++) {
+    if (String(blok[i][0] || '').trim().toUpperCase() !== hledanePsp) continue;
 
-    const radId = (data[i][c.idStroje - 1] || '').toString().trim().toUpperCase();
+    const radId = String(blok[i][POSUN_ID] || '').trim().toUpperCase();
 
     // Bez ID stroje (sken PSP z dokladu) bereme všechny řádky PSP
     if (hledanyId) {
@@ -462,9 +614,9 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
       if (!jeNasStroj && !jePrislusenstvi) continue;
     }
 
-    const stavajici = data[i][sloupec - 1];
+    const stavajici = cilCol[i][0];
     if (stavajici && !existujiciCas) existujiciCas = stavajici;
-    cileRadky.push(i + 1);
+    cileRadky.push(i + 2);
   }
 
   if (cileRadky.length === 0) return { zapsanoRadku: 0, jizZapsano: false };
@@ -494,7 +646,7 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
 // AUDITNÍ LOG – list POHYBY
 // ============================================================
 function zapisDoPohybu_(record, cas, pocetRadku) {
-  const ss = SpreadsheetApp.openById(getSheetId_());
+  const ss = getSS_();
   let sheet = ss.getSheetByName(WMS_CONFIG.pohybyList);
 
   if (!sheet) {
@@ -588,8 +740,21 @@ function nastavToken() {
 // DIAGNOSTIKA
 // ============================================================
 
+// Udržuje skript zahřátý. Po nastavení časovače (Spouštěče → Přidat spouštěč →
+// funkce "zahrej", časový, každých 5 minut) Google instanci tak často neuspává
+// a první sken po pauze netrvá tři sekundy. Není to záruka, jen to pomáhá.
+function zahrej() {
+  try {
+    getList_(WMS_CONFIG.dataList).getRange(1, 1).getValue();
+  } catch (e) {
+    Logger.log('zahrej: ' + e.message);
+  }
+}
+
 // Založí sloupce WMS a řekne, kde skončily. Spusťte jako první.
 function pripravSloupce() {
+  PropertiesService.getScriptProperties().deleteProperty('WMS_COL_CACHE');
+  _wmsSloupce = null;
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms = wmsSloupce_(sheet);
   Logger.log('List: ' + WMS_CONFIG.dataList + ' (' + sheet.getLastRow() + ' řádků)');
@@ -632,6 +797,81 @@ function najdiTestovaciStroj() {
     nalezeno++;
   }
   if (nalezeno === 0) Logger.log('Žádný takový stroj.');
+}
+
+// Změří, jak dlouho trvá vyhledání stroje a načtení seznamu k výdeji.
+// Před spuštěním si do PROMENNE dole doplňte ID stroje z najdiTestovaciStroj().
+function zmerRychlost() {
+  const ID = '4CK1';
+
+  // Každý požadavek z čtečky začíná s prázdnou pamětí, takže i měření
+  // musí začínat nastudena – jinak by druhé číslo vyšlo falešně dobře.
+  zapomen_();
+  let t = Date.now();
+  const v = lookupStroj(ID, 'prijem');
+  Logger.log('lookupStroj(' + ID + '): ' + (Date.now() - t) + ' ms  →  '
+    + (v.nalezeno ? v.nazev : v.zprava || v.chyba));
+
+  zapomen_();
+  t = Date.now();
+  const s = getSeznamKVydeje();
+  Logger.log('getSeznamKVydeje(): ' + (Date.now() - t) + ' ms  →  '
+    + s.pobocky.length + ' poboček, ' + s.celkemPsp + ' PSP');
+}
+
+// Rozpad času přímo uvnitř lookupStroj – spusťte třikrát po sobě.
+function zmerLookupPodrobne() {
+  const ID = '4CK1';
+
+  for (let pokus = 1; pokus <= 3; pokus++) {
+    zapomen_();
+    _mereni = { t: Date.now(), log: [] };
+    const zacatek = Date.now();
+    const v = lookupStroj(ID, 'prijem');
+    const celkem = Date.now() - zacatek;
+
+    Logger.log('───── pokus ' + pokus + ': CELKEM ' + celkem + ' ms ─────');
+    _mereni.log.forEach(function (r) { Logger.log(r); });
+    Logger.log('   výsledek: ' + (v.nazev || v.zprava || v.chyba));
+    _mereni = null;
+  }
+}
+
+// Rozloží zpoždění na jednotlivé kroky – ať je vidět, co přesně trvá.
+function zmerFaze() {
+  zapomen_();
+
+  let t = Date.now();
+  const ss = SpreadsheetApp.openById(getSheetId_());
+  Logger.log('1. otevření tabulky:            ' + (Date.now() - t) + ' ms');
+
+  t = Date.now();
+  const sheet = ss.getSheetByName(WMS_CONFIG.dataList);
+  Logger.log('2. výběr listu DATA:            ' + (Date.now() - t) + ' ms');
+
+  t = Date.now();
+  const posledni = sheet.getLastRow();
+  const sirka    = sheet.getLastColumn();
+  Logger.log('3. zjištění rozměrů (' + posledni + '×' + sirka + '):  ' + (Date.now() - t) + ' ms');
+
+  t = Date.now();
+  sheet.getRange(1, 1, 1, sirka).getValues();
+  Logger.log('4. čtení hlavičky:              ' + (Date.now() - t) + ' ms');
+
+  const od = Math.max(2, posledni - 1499);
+  const kolik = posledni - od + 1;
+
+  t = Date.now();
+  sheet.getRange(od, 2, kolik, 18).getValues();
+  Logger.log('5. blok ' + kolik + '×18 řádků:        ' + (Date.now() - t) + ' ms');
+
+  t = Date.now();
+  sheet.getRange(od, 31, kolik, 10).getValues();
+  Logger.log('6. blok ' + kolik + '×10 řádků:        ' + (Date.now() - t) + ' ms');
+
+  t = Date.now();
+  sheet.getRange(2, 6, posledni - 1, 4).getValues();
+  Logger.log('7. blok ' + (posledni - 1) + '×4 (celá tabulka): ' + (Date.now() - t) + ' ms');
 }
 
 function testSeznamKVydeji() {

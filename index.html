@@ -492,6 +492,69 @@
     }
     .success-flash.show { opacity: 1; }
 
+    /* ── VÝDEJ – seznam poboček a PSP ── */
+    .vydej-radek {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      min-height: 64px;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .vydej-radek:active { transform: scale(0.98); border-color: var(--red); }
+    .vydej-radek.vybrano {
+      border-color: var(--green);
+      background: rgba(39,174,96,0.12);
+    }
+    .vydej-kod {
+      background: var(--navy-card);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+    .vydej-telo { flex: 1; min-width: 0; }
+    .vydej-nazev { font-size: 16px; font-weight: 700; }
+    .vydej-meta { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+    .vydej-pocet {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--red-light);
+      flex-shrink: 0;
+    }
+    /* Velké zaškrtávátko – ovládá se palcem v rukavici */
+    .vydej-check {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      border: 2.5px solid var(--grey);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 900;
+      color: transparent;
+    }
+    .vydej-radek.vybrano .vydej-check {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff;
+    }
+    .vydej-polozka {
+      font-size: 12px;
+      color: var(--text-dim);
+      padding-left: 2px;
+      margin-top: 2px;
+    }
+
     /* ── HISTORY ── */
     .history-list { display: flex; flex-direction: column; gap: 8px; }
     .history-item {
@@ -693,7 +756,7 @@
       <div class="action-card" id="card-vydej" onclick="selectAction('vydej')">
         <div class="action-icon">📤</div>
         <div class="action-label">Výdej</div>
-        <div class="action-desc">Stroj odjíždí z CS2</div>
+        <div class="action-desc">Vybrat pobočku a PSP</div>
       </div>
     </div>
 
@@ -787,6 +850,36 @@
 
   </div>
 
+  <!-- VÝDEJ – KROK 1: SEZNAM POBOČEK -->
+  <div id="screen-vydej" class="screen">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="section-title">Pobočky čekající na výdej</div>
+      <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px;min-height:auto;"
+              onclick="nactiSeznamVydeje()">Obnovit</button>
+    </div>
+    <div class="scanner-hint" id="vydej-info">Načítám…</div>
+    <div class="history-list" id="vydej-pobocky"></div>
+    <button class="btn btn-ghost" onclick="showTab('scan')">← Zpět na skenování</button>
+  </div>
+
+  <!-- VÝDEJ – KROK 2: PSP VYBRANÉ POBOČKY -->
+  <div id="screen-vydej-psp" class="screen">
+    <div class="varovani" id="vydej-varovani" style="display:none;">
+      <span class="varovani-ikona" id="vydej-varovani-ikona">⚠️</span>
+      <span id="vydej-varovani-text"></span>
+    </div>
+    <div class="section-title" id="vydej-psp-nadpis">—</div>
+    <div class="scanner-hint">Zaškrtněte PSP, která teď odjíždějí</div>
+    <div class="history-list" id="vydej-psp-list"></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;padding:0 20px;"
+              onclick="showTab('vydej')">← Zpět</button>
+      <button class="btn btn-success" id="btn-vydej" onclick="potvrditVydej()" style="flex:1;">
+        ✓ Potvrdit výdej (0)
+      </button>
+    </div>
+  </div>
+
   <!-- HISTORY SCREEN -->
   <div id="screen-history" class="screen">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -874,6 +967,9 @@ const state = {
   currentLokace: null,
   currentNonce: null,        // otisk aktuálního skenu (proti dvojímu zápisu)
   prepsatPotvrzeno: null,    // uživatel potvrdil přepis už zapsaného času
+  vydejData: null,           // seznam poboček načtený ze serveru
+  vydejPobocka: null,        // právě otevřená pobočka
+  vydejVybrane: {},          // zaškrtnutá PSP k výdeji
   scanning: false,
   codeReader: null,
   history: [],
@@ -886,7 +982,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadConfig();
   loadHistory();
 
-  const saved = localStorage.getItem('dek_wms_config');
+  const saved = lsGet('dek_wms_config');
   if (saved) {
     try {
       const cfg = JSON.parse(saved);
@@ -904,7 +1000,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadConfig() {
-  const saved = localStorage.getItem('dek_wms_config');
+  const saved = lsGet('dek_wms_config');
   if (saved) {
     try { Object.assign(state.config, JSON.parse(saved)); } catch(e) {}
   }
@@ -920,7 +1016,7 @@ function loadConfig() {
 
 function loadHistory() {
   try {
-    const h = localStorage.getItem('dek_wms_history');
+    const h = lsGet('dek_wms_history');
     if (h) state.history = JSON.parse(h);
   } catch(e) { state.history = []; }
   renderHistory();
@@ -958,7 +1054,7 @@ function startDemo() {
 }
 
 function saveConfig() {
-  localStorage.setItem('dek_wms_config', JSON.stringify(state.config));
+  lsSet('dek_wms_config', JSON.stringify(state.config));
 }
 
 function showMainApp() {
@@ -974,7 +1070,7 @@ function showMainApp() {
 //  TABS
 // ─────────────────────────────────────────────
 function showTab(name) {
-  ['scan','history','settings','confirm'].forEach(s => {
+  ['scan','history','settings','confirm','vydej','vydej-psp'].forEach(s => {
     el('screen-' + s).classList.remove('active');
   });
   ['scan','history','settings'].forEach(t => {
@@ -1002,11 +1098,15 @@ function selectAction(action) {
   ['prijem','vydej'].forEach(a => {
     el('card-' + a).classList.toggle('selected', a === action);
   });
-  const hints = {
-    prijem: 'Naskenujte QR kód přijímaného stroje',
-    vydej:  'Naskenujte QR kód vydávaného stroje',
-  };
-  el('scan-hint').textContent = hints[action];
+
+  // Výdej se neskenuje – jde se přes seznam poboček a zaškrtání PSP
+  if (action === 'vydej') {
+    showTab('vydej');
+    nactiSeznamVydeje();
+    return;
+  }
+
+  el('scan-hint').textContent = 'Naskenujte QR kód přijímaného stroje';
 }
 
 // ─────────────────────────────────────────────
@@ -1434,7 +1534,7 @@ async function confirmMove() {
 
   flashSuccess();
   state.history.unshift(record);
-  localStorage.setItem('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
+  lsSet('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
   renderHistory();
 
   const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
@@ -1473,6 +1573,189 @@ async function saveRecord(record) {
 }
 
 // ─────────────────────────────────────────────
+//  VÝDEJ – pobočky → PSP → hromadné potvrzení
+// ─────────────────────────────────────────────
+// Seznam počítá server živě z listu DATA.
+// Záměrně se nečte list LOGISTIK-výdej: ten se obnovuje ručním
+// kliknutím a mohl by nabídnout PSP, které už někdo vydal.
+
+async function nactiSeznamVydeje() {
+  el('vydej-info').textContent = 'Načítám seznam…';
+  el('vydej-pobocky').innerHTML = '';
+
+  const data = (state.config.demoMode || !state.config.scriptUrl)
+    ? demoSeznamVydeje()
+    : await jsonp({ action: 'seznamKVydeji' }, 40000);
+
+  if (!data || data.chyba || !data.pobocky) {
+    el('vydej-info').textContent = '';
+    el('vydej-pobocky').innerHTML =
+      '<div class="varovani chyba"><span class="varovani-ikona">⛔</span><span>'
+      + ((data && data.chyba) || 'Seznam se nepodařilo načíst') + '</span></div>';
+    return null;
+  }
+
+  state.vydejData = data;
+  el('vydej-info').textContent =
+    data.pobocky.length + ' poboček · ' + data.celkemPsp + ' PSP na skladě';
+
+  if (!data.pobocky.length) {
+    el('vydej-pobocky').innerHTML =
+      '<div style="text-align:center;padding:40px 0;color:var(--text-dim);font-size:14px;">Nic nečeká na výdej</div>';
+    return data;
+  }
+
+  el('vydej-pobocky').innerHTML = data.pobocky.map((p, i) => `
+    <div class="vydej-radek" onclick="otevriPobocku(${i})">
+      <div class="vydej-kod">${p.kod}</div>
+      <div class="vydej-telo"><div class="vydej-nazev">${p.nazev}</div></div>
+      <div class="vydej-pocet">${p.pocetPsp} PSP ›</div>
+    </div>`).join('');
+
+  return data;
+}
+
+function otevriPobocku(index) {
+  const p = state.vydejData.pobocky[index];
+  if (!p) return;
+  state.vydejPobocka = p;
+  state.vydejVybrane = {};
+  el('vydej-psp-nadpis').textContent = p.kod + ' · ' + p.nazev;
+  el('vydej-varovani').style.display = 'none';
+  vykresliPspList();
+  showTab('vydej-psp');
+}
+
+function vykresliPspList() {
+  const p = state.vydejPobocka;
+  if (!p) return;
+  el('vydej-psp-list').innerHTML = p.pspList.map((psp, i) => {
+    const vybrano = state.vydejVybrane[psp.cisloPsp] ? ' vybrano' : '';
+    const polozky = psp.polozky.map(x =>
+      '<div class="vydej-polozka">'
+      + (x.idStroje ? '<b>' + x.idStroje + '</b> · ' : '')
+      + (x.nazev || '—') + '</div>'
+    ).join('');
+    return `
+      <div class="vydej-radek${vybrano}" onclick="prepniPsp(${i})" style="align-items:flex-start;">
+        <div class="vydej-check">✓</div>
+        <div class="vydej-telo">
+          <div class="vydej-nazev">${psp.cisloPsp}</div>
+          ${polozky}
+        </div>
+      </div>`;
+  }).join('');
+  aktualizujTlacitkoVydeje();
+}
+
+function prepniPsp(index) {
+  const psp = state.vydejPobocka.pspList[index];
+  if (!psp) return;
+  if (state.vydejVybrane[psp.cisloPsp]) delete state.vydejVybrane[psp.cisloPsp];
+  else state.vydejVybrane[psp.cisloPsp] = psp;
+  vykresliPspList();
+}
+
+function aktualizujTlacitkoVydeje() {
+  const pocet = Object.keys(state.vydejVybrane || {}).length;
+  const btn = el('btn-vydej');
+  btn.innerHTML = '✓ Potvrdit výdej (' + pocet + ')';
+  btn.disabled = pocet === 0;
+}
+
+async function potvrditVydej() {
+  const vybrane = Object.keys(state.vydejVybrane || {});
+  if (!vybrane.length) return;
+
+  const btn = el('btn-vydej');
+  const p = state.vydejPobocka;
+  btn.disabled = true;
+  el('vydej-varovani').style.display = 'none';
+
+  const hotovo = [];
+  const chyby  = [];
+
+  // Postupně, ne najednou – skript si při zápisu bere zámek
+  for (let i = 0; i < vybrane.length; i++) {
+    const cisloPsp = vybrane[i];
+    btn.innerHTML = '<span class="spinner"></span> ' + (i + 1) + ' / ' + vybrane.length;
+
+    const record = {
+      id:          '',                // prázdné = zapiš ke všem řádkům PSP
+      psp:         cisloPsp,
+      nazev:       cisloPsp,
+      akce:        'vydej',
+      idVykladka:  p.kod,
+      pobVykladka: p.nazev,
+      lokace:      '—',
+      sklad:       state.config.location,
+      cas:         new Date().toISOString(),
+      nonce:       'vydej-' + cisloPsp + '-' + Date.now(),
+    };
+
+    const odpoved = await saveRecord(record) || {};
+    if (odpoved.ok) {
+      hotovo.push(cisloPsp);
+      // do historie ukládáme číslo PSP jako identifikaci (stroj se neskenoval)
+      state.history.unshift(Object.assign({}, record, { id: cisloPsp }));
+    } else {
+      chyby.push(cisloPsp + ' – ' + (odpoved.zprava || odpoved.chyba || 'neznámá chyba'));
+    }
+  }
+
+  lsSet('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
+  renderHistory();
+
+  btn.disabled = false;
+  state.vydejVybrane = {};
+
+  // Přepočítat seznam, ať zmizí to, co právě odjelo
+  const nova = await nactiSeznamVydeje();
+
+  if (chyby.length) {
+    // Zůstaň u pobočky a ukaž, co neprošlo
+    const stejna = nova && nova.pobocky.filter(x => x.kod === p.kod)[0];
+    if (stejna) { state.vydejPobocka = stejna; vykresliPspList(); }
+    zobrazVydejVarovani(
+      'Vydáno ' + hotovo.length + ' z ' + vybrane.length + '. NEPROŠLO: ' + chyby.join(' | '),
+      true
+    );
+    showTab('vydej-psp');
+  } else {
+    flashSuccess();
+    showToast('📤 Vydáno ' + hotovo.length + ' PSP', 'success');
+    showTab('vydej');
+  }
+}
+
+function zobrazVydejVarovani(text, jeChyba) {
+  const box = el('vydej-varovani');
+  el('vydej-varovani-text').textContent = text;
+  el('vydej-varovani-ikona').textContent = jeChyba ? '⛔' : '✓';
+  box.classList.toggle('chyba', !!jeChyba);
+  box.style.display = 'flex';
+}
+
+function demoSeznamVydeje() {
+  return {
+    ok: true, celkemPsp: 3,
+    pobocky: [
+      { kod: 'P200', nazev: 'Liberec', pocetPsp: 2, pspList: [
+        { cisloPsp: 'PSP-200-26-00167', polozky: [
+          { idStroje: '7RA8', nazev: 'AKU hřebíkovač NURON' },
+          { idStroje: '7A4V', nazev: 'Nabíječka NURON' }]},
+        { cisloPsp: 'PSP-200-26-00196', polozky: [
+          { idStroje: '8HY3', nazev: 'Pila stolová 350–400 mm' }]},
+      ]},
+      { kod: 'P700', nazev: 'Brno', pocetPsp: 1, pspList: [
+        { cisloPsp: 'PSP-700-26-00088', polozky: [
+          { idStroje: '61EJ', nazev: 'Míchač stavebních směsí 140 l' }]},
+      ]},
+    ]
+  };
+}
+
+// ─────────────────────────────────────────────
 //  HISTORY
 // ─────────────────────────────────────────────
 function renderHistory() {
@@ -1508,7 +1791,7 @@ function renderHistory() {
 function clearHistory() {
   if (confirm('Smazat historii pohybů?')) {
     state.history = [];
-    localStorage.removeItem('dek_wms_history');
+    lsDel('dek_wms_history');
     renderHistory();
   }
 }
@@ -1550,6 +1833,19 @@ function saveLokace() {
 //  UTILS
 // ─────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
+
+// localStorage nemusí být k dispozici (anonymní okno, zakázaná data webu,
+// přísně nastavená firemní čtečka). Bez ošetření by celá aplikace spadla
+// hned při startu, proto se k němu chodí jen přes tyhle tři funkce.
+function lsGet(klic) {
+  try { return localStorage.getItem(klic); } catch (e) { return null; }
+}
+function lsSet(klic, hodnota) {
+  try { localStorage.setItem(klic, hodnota); return true; } catch (e) { return false; }
+}
+function lsDel(klic) {
+  try { localStorage.removeItem(klic); } catch (e) {}
+}
 
 function formatTime(date) {
   return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });

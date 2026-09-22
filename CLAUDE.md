@@ -117,9 +117,17 @@ Hotovo ve v3.0 (backend):
 - `lookupPsp()` pro sken čárového kódu z dokladu
 - POHYBY se zapisuje podle existující hlavičky, ne napevno
 
+Hotovo ve frontendu:
+- příjem skenem (kamera i HID laser), trvalé varovné pruhy místo mizejících bublin
+- **výdej bez skenování**: seznam poboček → PSP se stroji → zaškrtat → potvrdit
+- `localStorage` ošetřený – aplikace naběhne i tam, kde je ukládání zakázané
+- ověřeno příjmem `4CK1` z PSP-860-26-00082: čas dostal jen on, `92CN` zůstalo prázdné
+
 Zbývá:
-- **Obrazovka výdeje ve frontendu** – backend `getSeznamKVydeje()` je hotový,
-  UI (seznam poboček → PSP → zaškrtat → potvrdit) ještě ne.
+- **Sken čárového kódu PSP při příjmu** – backend `lookupPsp()` hotový, UI ne
+- **„Co ještě mělo dnes přijet z této pobočky"** – seznam dalších strojů se
+  stejným kódem nakládky a datem svozu. Není ani v backendu.
+- **Kamera na DT66** – zbytečně běží a žere baterku, měla by být volitelná
 - **Výkon** – `getSeznamKVydeje` čte celý list. Až bude pomalé, přidat
   `CacheService`, **ale invalidovat cache při každém zápisu**, jinak hrozí
   dvojí výdej.
