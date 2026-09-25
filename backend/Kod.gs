@@ -172,6 +172,12 @@ function doGet(e) {
     } else if (action === 'seznamKVydeji') {
       result = getSeznamKVydeje();
 
+    } else if (action === 'uzivatele') {
+      result = getUzivatele();
+
+    } else if (action === 'prihlaseni') {
+      result = prihlas(params.jmeno || '', params.pin || '');
+
     } else if (action === 'save') {
       result = ulozPohyb({
         id:          params.id          || '',
@@ -185,13 +191,14 @@ function doGet(e) {
         pobVykladka: params.pobVykladka || '',
         lokace:      params.lokace      || '',
         sklad:       params.sklad       || 'CS2',
+        uzivatel:    params.uzivatel    || '',
         cas:         params.cas         || '',
         nonce:       params.nonce       || '',
         prepsat:     params.prepsat === '1',
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '3.0', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '3.1', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };
@@ -644,6 +651,87 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
 }
 
 // ============================================================
+// PŘIHLÁŠENÍ SKLADNÍKŮ
+// ============================================================
+// List UZIVATELE:  Jméno | PIN | Aktivní
+// PINy se NIKDY neposílají do čtečky – ověřují se tady na serveru.
+// Slouží k dohledatelnosti (kdo co naskenoval), ne jako trezor:
+// kdo zná kolegův PIN, může jednat jeho jménem. Proti cizím lidem
+// chrání sdílený token (WMS_TOKEN), ne tohle.
+// ============================================================
+
+function getUzivateleList_() {
+  const ss = getSS_();
+  let sheet = ss.getSheetByName(WMS_CONFIG.uzivateleList);
+  if (!sheet) {
+    sheet = ss.insertSheet(WMS_CONFIG.uzivateleList);
+    sheet.appendRow(['Jméno', 'PIN', 'Aktivní']);
+    sheet.getRange(1, 1, 1, 3)
+      .setBackground('#C8281A').setFontColor('#ffffff').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 220);
+  }
+  return sheet;
+}
+
+// Vrátí jen jména aktivních uživatelů – bez PINů
+function getUzivatele() {
+  const sheet = getUzivateleList_();
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) return { ok: true, uzivatele: [] };
+
+  const data = sheet.getRange(2, 1, n, 3).getValues();
+  const jmena = [];
+  for (let i = 0; i < n; i++) {
+    const jmeno  = String(data[i][0] || '').trim();
+    const aktivni = String(data[i][2] || '').trim().toUpperCase();
+    if (!jmeno) continue;
+    if (aktivni === 'NE' || aktivni === 'FALSE') continue;
+    jmena.push(jmeno);
+  }
+  jmena.sort(function (a, b) { return a.localeCompare(b, 'cs'); });
+  return { ok: true, uzivatele: jmena };
+}
+
+function prihlas(jmeno, pin) {
+  jmeno = String(jmeno || '').trim();
+  pin   = String(pin   || '').trim();
+  if (!jmeno || !pin) return { ok: false, chyba: 'Vyberte jméno a zadejte PIN' };
+
+  // Ochrana proti hádání PINu – po pěti omylech pauza na pět minut
+  const cache = CacheService.getScriptCache();
+  const klic  = 'pokusy_' + jmeno.toLowerCase();
+  const pokusu = Number(cache.get(klic) || 0);
+  if (pokusu >= 5) {
+    return { ok: false, chyba: 'Příliš mnoho pokusů, zkuste to za 5 minut' };
+  }
+
+  const sheet = getUzivateleList_();
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) return { ok: false, chyba: 'V tabulce nejsou žádní uživatelé' };
+
+  const data = sheet.getRange(2, 1, n, 3).getValues();
+  for (let i = 0; i < n; i++) {
+    const radJmeno = String(data[i][0] || '').trim();
+    if (radJmeno.toLowerCase() !== jmeno.toLowerCase()) continue;
+
+    const aktivni = String(data[i][2] || '').trim().toUpperCase();
+    if (aktivni === 'NE' || aktivni === 'FALSE') {
+      return { ok: false, chyba: 'Tento uživatel je neaktivní' };
+    }
+
+    if (String(data[i][1] || '').trim() === pin) {
+      cache.remove(klic);
+      return { ok: true, jmeno: radJmeno };
+    }
+    break;
+  }
+
+  cache.put(klic, String(pokusu + 1), 300);
+  return { ok: false, chyba: 'Nesprávný PIN' };
+}
+
+// ============================================================
 // AUDITNÍ LOG – list POHYBY
 // ============================================================
 function zapisDoPohybu_(record, cas, pocetRadku) {
@@ -656,9 +744,9 @@ function zapisDoPohybu_(record, cas, pocetRadku) {
       'Čas', 'ID stroje', 'Název', 'PSP', 'E.Č. PUJ', 'Akce',
       'Pobočka odkud (kód)', 'Pobočka odkud',
       'Pobočka kam (kód)', 'Pobočka kam',
-      'Lokace CS2', 'Sklad', 'Řádků', 'Zapsáno'
+      'Lokace CS2', 'Sklad', 'Uživatel', 'Řádků', 'Zapsáno'
     ]);
-    sheet.getRange(1, 1, 1, 14)
+    sheet.getRange(1, 1, 1, 15)
       .setBackground('#C8281A').setFontColor('#ffffff').setFontWeight('bold');
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 160);
@@ -682,12 +770,24 @@ function zapisDoPohybu_(record, cas, pocetRadku) {
     'pobočka kam':         record.pobVykladka || '',
     'lokace cs2':          record.lokace      || '',
     'sklad':               record.sklad       || 'CS2',
+    'uživatel':            record.uzivatel    || '',
     'řádků':               pocetRadku         || 0,
     'zapsáno':             new Date(),
   };
 
-  const sirka    = Math.max(sheet.getLastColumn(), 1);
-  const hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0];
+  let sirka    = Math.max(sheet.getLastColumn(), 1);
+  let hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0];
+
+  // Starší list POHYBY sloupec Uživatel nemá – doplníme ho na konec
+  const maUzivatele = hlavicka.some(function (h) {
+    return String(h || '').trim().toLowerCase() === 'uživatel';
+  });
+  if (!maUzivatele) {
+    sheet.getRange(1, sirka + 1).setValue('Uživatel').setFontWeight('bold');
+    SpreadsheetApp.flush();
+    sirka += 1;
+    hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0];
+  }
   const radek = hlavicka.map(function (nadpis) {
     const klic = String(nadpis || '').trim().toLowerCase();
     return Object.prototype.hasOwnProperty.call(hodnoty, klic) ? hodnoty[klic] : '';
@@ -740,6 +840,23 @@ function nastavToken() {
 // ============================================================
 // DIAGNOSTIKA
 // ============================================================
+
+// Založí list UZIVATELE (pokud chybí) a vypíše, co v něm je.
+// Uživatele pak přidávejte prostě psaním do tabulky:
+//   Jméno            | PIN  | Aktivní
+//   Novák Jan        | 4812 | ANO
+// Sloupec Aktivní nechte prázdný nebo ANO; NE uživatele vypne,
+// aniž byste mazala historii jeho pohybů.
+function pripravUzivatele() {
+  const sheet = getUzivateleList_();
+  const v = getUzivatele();
+  Logger.log('List UZIVATELE je připravený (' + sheet.getLastRow() + ' řádků).');
+  Logger.log('Aktivních uživatelů: ' + v.uzivatele.length);
+  v.uzivatele.forEach(function (j) { Logger.log('  • ' + j); });
+  if (!v.uzivatele.length) {
+    Logger.log('Zatím nikdo – doplňte do listu jméno a čtyřmístný PIN.');
+  }
+}
 
 // Udržuje skript zahřátý. Po nastavení časovače (Spouštěče → Přidat spouštěč →
 // funkce "zahrej", časový, každých 5 minut) Google instanci tak často neuspává
