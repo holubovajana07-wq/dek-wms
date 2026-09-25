@@ -272,6 +272,7 @@ function doGet(e) {
         cas:         params.cas         || '',
         nonce:       params.nonce       || '',
         prepsat:     params.prepsat === '1',
+        bezDokladu:  params.bezDokladu === '1',
       });
 
     } else if (action === 'ping') {
@@ -758,13 +759,28 @@ function ulozPohyb(record) {
     const radekLogu = zapisDoPohybu_(record, cas, vysledek.zapsanoRadku);
     if (record.nonce) cache.put('nonce_' + record.nonce, '1', 600);
 
-    return {
+    const odpoved = {
       ok:           true,
       radekLogu:    radekLogu,
       zapsanoRadku: vysledek.zapsanoRadku,
       zprava: (record.akce === 'prijem' ? 'Příjem' : 'Výdej')
               + ' zapsán (' + vysledek.zapsanoRadku + ' řádků)',
     };
+
+    // Stroj dorazil bez papírového dokladu – dát vědět logistikovi.
+    // Zápis už proběhl, takže případné selhání mailu ho neruší;
+    // jen se to poctivě vrátí do aplikace.
+    if (record.bezDokladu) {
+      const info = record.psp ? lookupPsp(record.psp) : {};
+      const mail = posliUpozorneniBezDokladu_(record, info || {}, cas);
+      odpoved.mail = mail;
+      odpoved.zprava = 'Přijato BEZ DOKLADU. '
+        + (mail.odeslano
+            ? 'Upozornění odesláno na ' + mail.komu
+            : 'E-MAIL SE NEPODAŘILO ODESLAT: ' + mail.duvod);
+    }
+
+    return odpoved;
 
   } catch (err) {
     Logger.log('Chyba ulozPohyb: ' + err.message);
@@ -928,6 +944,59 @@ function prihlas(jmeno, pin) {
 }
 
 // ============================================================
+// PŘÍJEM BEZ DOKLADU – upozornění logistikovi
+// ============================================================
+// Stroj dorazil, ale bez papírového PSP. Zapíše se jako normální
+// příjem (protože fyzicky na skladě je) a navíc odejde e-mail,
+// aby logistik doklad vytiskl.
+//
+// Adresa je ve VLASTNOSTECH TOHOTO SKRIPTU (EMAIL_BEZ_DOKLADU),
+// schválně NE v listu EMAIL_NASTAVENI. Ten patří dispečerské
+// automatizaci a míchat do něj WMS by mátlo obě strany.
+//
+// Nastavení: Nastavení projektu → Vlastnosti skriptu
+//   EMAIL_BEZ_DOKLADU = adresa (víc adres oddělte čárkou)
+// ============================================================
+
+const SLOZKA_PSP = 'V:\\CS\\DOPRAVA\\PSP_IMPORT\\02_ZPRACOVANO';
+
+function getEmailPrijemce_() {
+  const komu = (PropertiesService.getScriptProperties()
+    .getProperty('EMAIL_BEZ_DOKLADU') || '').trim();
+  return komu ? { komu: komu } : null;
+}
+
+function posliUpozorneniBezDokladu_(record, info, cas) {
+  const prijemce = getEmailPrijemce_();
+  if (!prijemce) {
+    return { odeslano: false,
+      duvod: 'Není nastavena vlastnost EMAIL_BEZ_DOKLADU ve Vlastnostech skriptu' };
+  }
+
+  const psp   = record.psp || '(bez PSP)';
+  const odkud = info.pobNakladka || record.pobNakladka || '?';
+  const kam   = info.pobVykladka || record.pobVykladka || 'CS2';
+  const kdy   = Utilities.formatDate(cas, Session.getScriptTimeZone(), 'd. M. \'ve\' HH:mm');
+
+  const predmet = psp + ' dorazilo bez dokladu';
+
+  const telo =
+      psp + ' dorazilo bez dokladu\n\n'
+    + 'Stroj: ' + (record.id || '?') + ', ' + (record.nazev || info.nazev || '?') + '\n'
+    + 'Z pobočky: ' + odkud + ' → ' + kam + '\n'
+    + 'Přijal: ' + (record.uzivatel || '?') + ', ' + kdy + '\n\n'
+    + 'Doklad k vytištění:\n'
+    + SLOZKA_PSP + '\\' + psp + '.pdf\n';
+
+  try {
+    MailApp.sendEmail(prijemce.komu, predmet, telo, { name: 'DEK WMS' });
+    return { odeslano: true, komu: prijemce.komu };
+  } catch (err) {
+    return { odeslano: false, duvod: err.message };
+  }
+}
+
+// ============================================================
 // AUDITNÍ LOG – list POHYBY
 // ============================================================
 function zapisDoPohybu_(record, cas, pocetRadku) {
@@ -949,7 +1018,9 @@ function zapisDoPohybu_(record, cas, pocetRadku) {
     sheet.setColumnWidth(4, 180);
   }
 
-  const akceText = record.akce === 'prijem' ? 'PŘÍJEM na CS2' : 'VÝDEJ z CS2';
+  const akceText = record.bezDokladu
+    ? 'PŘÍJEM BEZ DOKLADU'
+    : (record.akce === 'prijem' ? 'PŘÍJEM na CS2' : 'VÝDEJ z CS2');
 
   // Řádek se skládá PODLE EXISTUJÍCÍ HLAVIČKY, ne napevno –
   // list POHYBY už v tabulce může být s jiným pořadím sloupců.
@@ -1024,6 +1095,31 @@ function nastavSheetId() {
   if (ID === 'SEM_VLOZTE_ID_TABULKY') throw new Error('Nejdřív do funkce vložte skutečné ID tabulky.');
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', ID);
   Logger.log('SHEET_ID nastaveno.');
+}
+
+// Nastaví adresu, kam chodí upozornění "stroj bez dokladu".
+// Víc adres oddělte čárkou. Nemá to nic společného s listem
+// EMAIL_NASTAVENI – ten patří dispečerské automatizaci.
+function nastavEmailBezDokladu() {
+  const ADRESA = 'SEM_VLOZTE_ADRESU';
+  if (ADRESA === 'SEM_VLOZTE_ADRESU') {
+    throw new Error('Nejdřív do funkce vložte e-mailovou adresu.');
+  }
+  PropertiesService.getScriptProperties().setProperty('EMAIL_BEZ_DOKLADU', ADRESA);
+  Logger.log('Upozornění "bez dokladu" budou chodit na: ' + ADRESA);
+}
+
+// Pošle zkušební upozornění, ať je vidět, jak mail vypadá
+function testEmailBezDokladu() {
+  const vysledek = posliUpozorneniBezDokladu_(
+    { psp: 'PSP-730-26-00108', id: '8HY3', nazev: 'Pila stolová 350–400 mm',
+      uzivatel: 'Zkouška' },
+    { pobNakladka: 'Blansko', pobVykladka: 'CS2' },
+    new Date()
+  );
+  Logger.log(vysledek.odeslano
+    ? 'Odesláno na ' + vysledek.komu
+    : 'NEODESLÁNO: ' + vysledek.duvod);
 }
 
 function nastavToken() {

@@ -217,6 +217,23 @@
       border: 1.5px solid rgba(255,255,255,0.08);
     }
 
+    /* Příjem bez papírového dokladu – oranžová, aby byla odlišitelná
+       od zeleného PŘIJMOUT a nešla zmáčknout omylem */
+    .btn-bezdokladu {
+      background: rgba(243,156,18,0.15);
+      color: var(--amber);
+      border: 2px solid var(--amber);
+      font-size: 15px;
+    }
+    .btn-bezdokladu:active { background: rgba(243,156,18,0.3); }
+    /* Zakliknuto – plná oranžová, ať je na první pohled jasné,
+       že PŘIJMOUT teď zároveň odešle upozornění logistikovi */
+    .btn-bezdokladu.aktivni {
+      background: var(--amber);
+      color: #3a2600;
+      font-weight: 800;
+    }
+
     .btn-lg {
       min-height: 72px;
       font-size: 18px;
@@ -939,7 +956,7 @@
 
     <!-- Všechny položky na PSP -->
     <div id="psp-polozky-section" style="display:none;">
-      <div class="section-title">Všechny položky na tomto PSP</div>
+      <div class="section-title">Další položky na tomto PSP</div>
       <div id="psp-polozky-list" style="display:flex;flex-direction:column;gap:6px;"></div>
     </div>
 
@@ -965,10 +982,14 @@
       <input class="form-input" id="inp-lokace" placeholder="nebo napište lokaci (např. D4)" autocapitalize="characters" spellcheck="false">
     </div>
 
+    <button class="btn btn-bezdokladu" id="btn-bez-dokladu" onclick="prepniBezDokladu()">
+      <span id="bez-dokladu-znak">☐</span>&nbsp;STROJ BEZ DOKLADU
+    </button>
+
     <div style="display:flex;gap:10px;">
       <button class="btn btn-ghost" style="flex:0 0 auto;width:auto;padding:0 20px;" onclick="goBack()">← Zpět</button>
       <button class="btn btn-success" id="btn-confirm" onclick="confirmMove()" style="flex:1;">
-        ✓ Potvrdit pohyb
+        ✓ PŘIJMOUT
       </button>
     </div>
 
@@ -1580,8 +1601,12 @@ async function showConfirmScreen(id) {
   state.prepsatPotvrzeno = null;
   el('inp-lokace').value = '';
 
+  state.bezDokladu = false;
+  vykresliBezDokladu();
+
   const isPrijem = state.currentAction === 'prijem';
-  el('lokace-section').style.display = isPrijem ? 'flex' : 'none';
+  el('lokace-section').style.display   = isPrijem ? 'flex' : 'none';
+  el('btn-bez-dokladu').style.display  = isPrijem ? 'flex' : 'none';
   renderLokacePresets();
 
   // Lookup from sheets (or demo data)
@@ -1595,10 +1620,15 @@ async function showConfirmScreen(id) {
   el('res-odkud').textContent = info.pobNakladka || '—';
   el('res-kam').textContent   = info.pobVykladka || '—';
 
-  // Zobraz všechny položky PSP
-  if (info.polozky && info.polozky.length > 0) {
+  // Další položky na dokladu – bez toho stroje, který je vidět nahoře.
+  // Příslušenství bez ID tu zůstává, to je právě to, co je dobré vidět.
+  const dalsiPolozky = (info.polozky || []).filter(p =>
+    String(p.idStroje || '').trim().toUpperCase() !== String(id || '').trim().toUpperCase()
+  );
+
+  if (dalsiPolozky.length > 0) {
     el('psp-polozky-section').style.display = 'flex';
-    el('psp-polozky-list').innerHTML = info.polozky.map(p => {
+    el('psp-polozky-list').innerHTML = dalsiPolozky.map(p => {
       const idBadge = p.idStroje
         ? `<span style="background:var(--red);color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;letter-spacing:1px;">${p.idStroje}</span>`
         : '';
@@ -1763,7 +1793,7 @@ function demoLookup(id) {
       pobNakladka: 'Praha Hostivař', idNakladka: 'P100',
       pobVykladka: 'Sokolov',        idVykladka: 'P305',
       ecPuj: 'PUJ-22-00124',
-      polozky: [{ nazev: 'Vibrační deska reverzní do 200 kg', ecPuj: 'PUJ-22-00124', polozka: 'PP00098' }],
+      polozky: [{ idStroje: '9JT9', nazev: 'Vibrační deska reverzní do 200 kg', ecPuj: 'PUJ-22-00124', polozka: 'PP00098' }],
       dalsiZPobocky: [
         { idStroje: '61EJ', nazev: 'Míchač stavebních směsí 140 l', cisloPsp: 'PSP-100-26-00330', prijato: false },
         { idStroje: '8HY3', nazev: 'Pila stolová 350–400 mm',       cisloPsp: 'PSP-100-26-00331', prijato: false },
@@ -1778,8 +1808,8 @@ function demoLookup(id) {
       pobVykladka: 'CS2',     idVykladka: 'P096',
       ecPuj: 'PUJ-21-00087',
       polozky: [
-        { nazev: 'Plovoucí vibrační lišta 3m', ecPuj: 'PUJ-21-00087', polozka: 'PP00201' },
-        { nazev: 'Prodlužovací profil 1m',     ecPuj: 'PUJ-21-00088', polozka: 'PP00202' },
+        { idStroje: '1X7M', nazev: 'Plovoucí vibrační lišta 3m', ecPuj: 'PUJ-21-00087', polozka: 'PP00201' },
+        { idStroje: '',     nazev: 'Prodlužovací profil 1m',     ecPuj: 'PUJ-21-00088', polozka: 'PP00202' },
       ]
     },
     '49XE': {
@@ -1824,6 +1854,20 @@ function selectLokace(btn, val) {
 // ─────────────────────────────────────────────
 //  CONFIRM MOVE
 // ─────────────────────────────────────────────
+// Přepínač, ne akce. Skladník ho zaklikne a pak dá PŘIJMOUT –
+// zápis i upozornění logistikovi odejdou naráz, bez dalšího potvrzování.
+function prepniBezDokladu() {
+  state.bezDokladu = !state.bezDokladu;
+  vykresliBezDokladu();
+}
+
+function vykresliBezDokladu() {
+  const zapnuto = !!state.bezDokladu;
+  el('btn-bez-dokladu').classList.toggle('aktivni', zapnuto);
+  el('bez-dokladu-znak').textContent = zapnuto ? '☑' : '☐';
+  el('btn-confirm').innerHTML = zapnuto ? '✓ PŘIJMOUT BEZ DOKLADU' : '✓ PŘIJMOUT';
+}
+
 async function confirmMove() {
   const isPrijem = state.currentAction === 'prijem';
   const lokace = el('inp-lokace').value.trim() || state.currentLokace || '—';
@@ -1862,14 +1906,15 @@ async function confirmMove() {
     sklad:       state.config.location,
     uzivatel:    state.uzivatel || '',
     cas:         new Date().toISOString(),
-    nonce:       state.currentNonce,
+    nonce:       state.currentNonce + (state.bezDokladu ? '-bd' : ''),
     prepsat:     state.prepsatPotvrzeno === state.currentNonce,
+    bezDokladu:  !!state.bezDokladu,
   };
 
   const odpoved = await ulozSOverenim(record);
 
   btn.disabled = false;
-  btn.innerHTML = '✓ Potvrdit pohyb';
+  vykresliBezDokladu();
 
   // Skript hlásí, že čas už je zapsaný – zeptej se, jestli přepsat
   if (odpoved.jizZapsano) {
@@ -1903,12 +1948,21 @@ async function confirmMove() {
   lsSet('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
   renderHistory();
 
-  const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
-  showToast(`${akceText} ${state.currentId} uložen`, 'success');
+  if (record.bezDokladu) {
+    // Výsledek odeslání mailu musí být vidět – když neodejde,
+    // logistik o dokladu neví a nikdo by se to jinak nedozvěděl.
+    const poslano = odpoved.mail && odpoved.mail.odeslano;
+    zobrazVarovani(odpoved.zprava || 'Přijato bez dokladu', !poslano);
+    showToast(poslano ? '📄 Přijato bez dokladu, mail odeslán' : '⚠️ Mail neodešel', poslano ? 'success' : 'error');
+    if (!poslano) return;     // zůstaň na obrazovce, ať si toho skladník všimne
+  } else {
+    const akceText = isPrijem ? '📥 Příjem' : '📤 Výdej';
+    showToast(`${akceText} ${state.currentId} uložen`, 'success');
+  }
 
   setTimeout(() => {
     goBack();
-  }, 1200);
+  }, record.bezDokladu ? 2500 : 1200);
 }
 
 // DŮLEŽITÉ: tahle funkce musí vracet PRAVDU.
@@ -1933,6 +1987,7 @@ async function saveRecord(record) {
     lokace:      record.lokace,
     sklad:       record.sklad,
     uzivatel:    record.uzivatel,
+    bezDokladu:  record.bezDokladu ? '1' : '',
     cas:         record.cas,
     nonce:       record.nonce,
     prepsat:     record.prepsat ? '1' : '',
