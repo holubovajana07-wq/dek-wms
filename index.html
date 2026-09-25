@@ -1640,10 +1640,16 @@ function jsonp(params, timeoutMs) {
     const callbackName = 'cb' + Date.now() + Math.floor(Math.random() * 1000);
     const script = document.createElement('script');
 
+    // 45 s: první požadavek po delší pauze probouzí Apps Script a to může
+    // trvat i deset sekund. Kratší limit hlásil chybu tam, kde stačilo počkat.
+    const cekat = timeoutMs || 45000;
     const timeout = setTimeout(() => {
       cleanup();
-      resolve({ chyba: 'Vypršel časový limit – zkontrolujte připojení' });
-    }, timeoutMs || 15000);
+      resolve({
+        chyba: 'Skript neodpověděl do ' + Math.round(cekat / 1000)
+               + ' s (akce: ' + (params.action || '?') + ')'
+      });
+    }, cekat);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -1651,8 +1657,13 @@ function jsonp(params, timeoutMs) {
       if (script.parentNode) script.parentNode.removeChild(script);
     }
 
+    const zacatek = Date.now();
     window[callbackName] = function(data) {
       cleanup();
+      // Do konzole necháváme stopu, jak dlouho co trvalo – při ladění pomalosti
+      console.log('[WMS] ' + (params.action || '?')
+        + ' – celkem ' + (Date.now() - zacatek) + ' ms'
+        + (data && data.ms ? ', z toho skript ' + data.ms + ' ms' : ''));
       // Skript hlásí, že klíč vypršel nebo neplatí – vrať se na přihlášení
       if (data && data.prihlasitZnovu) vyprselePrihlaseni();
       resolve(data || { chyba: 'Prázdná odpověď ze skriptu' });
@@ -1878,7 +1889,7 @@ async function nactiSeznamVydeje() {
 
   const data = (state.config.demoMode || !state.config.scriptUrl)
     ? demoSeznamVydeje()
-    : await jsonp({ action: 'seznamKVydeji' }, 40000);
+    : await jsonp({ action: 'seznamKVydeji' }, 60000);
 
   if (!data || data.chyba || !data.pobocky) {
     el('vydej-info').textContent = '';

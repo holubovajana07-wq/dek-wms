@@ -212,6 +212,7 @@ function wmsSloupce_(sheet) {
 // ============================================================
 
 function doGet(e) {
+  const zacatek  = Date.now();
   const params   = (e && e.parameter) || {};
   const action   = params.action   || '';
   const callback = params.callback || '';
@@ -283,6 +284,9 @@ function doGet(e) {
   } catch (err) {
     result = { chyba: err.message };
   }
+
+  // Doba zpracování – ať je při potížích vidět, jestli se čekalo na skript
+  if (result && typeof result === 'object') result.ms = Date.now() - zacatek;
 
   return odpoved_(result, callback);
 }
