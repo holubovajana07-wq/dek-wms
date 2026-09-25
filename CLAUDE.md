@@ -41,8 +41,16 @@ index.html (GitHub Pages)  ──JSONP/GET──>  Apps Script  ──>  Google 
 Přepnutí mezi testem a ostrým provozem = **změna jediné vlastnosti `SHEET_ID`**
 v projektu `WMS backend`. Nic jiného se nemění.
 - Kód žije v gitu, **data v Google Sheets** a do gitu nepatří.
-- Komunikace **jen přes JSONP (GET)** – Apps Script neposílá CORS hlavičky,
-  takže `fetch()` z prohlížeče nefunguje spolehlivě. Nevracet se k tomu.
+- Komunikace přes **`fetch()` (GET)**. Původní handoff tvrdil, že kvůli CORS
+  nefunguje a musí se použít JSONP – **to už neplatí**, Apps Script hlavičky
+  posílá (ověřeno 25. 9. 2026: status 200, ~1,8 s).
+  JSONP zůstává jen jako záloha, když by `fetch` selhal.
+
+> ⚠️ **Nevracet se k JSONP jako k hlavní cestě.** Načítá odpověď přes
+> `<script src>`, a prohlížeče s ochranou proti sledování (Edge Tracking
+> Prevention, Safari ITP) takové volání na `google.com` blokují. Projevovalo
+> se to jako náhodné „nepodařilo se spojit se skriptem" – jednou to prošlo,
+> jindy ne, podle prohlížeče.
 - Frontend je jeden soubor bez build kroku. Žádný npm, žádný bundler.
 - ID tabulky a token jsou ve **Vlastnostech skriptu** (`SHEET_ID`, `WMS_TOKEN`),
   ne v kódu – repozitář je veřejný kvůli GitHub Pages.

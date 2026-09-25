@@ -1717,21 +1717,77 @@ function goBack() {
 // takže z prohlížeče spolehlivě funguje jen JSONP přes GET.
 // Každý požadavek nese parametr "_" s časem, aby ho prohlížeč
 // nevytáhl z cache místo skutečného volání.
-// Apps Script občas požadavek prostě zahodí – vrátí chybu spojení,
-// i když je všechno v pořádku. Je to jeho vlastnost, ne naše chyba.
-// Proto to zkusíme třikrát, než obtěžujeme skladníka.
-// Opakování je bezpečné: čtení nic nemění a u zápisu má skript otisk
-// (nonce), takže stejný požadavek podruhé nezapíše.
-async function jsonp(params, timeoutMs) {
-  for (let pokus = 1; pokus <= 3; pokus++) {
-    const odpoved = await jsonpJednou_(params, timeoutMs);
-    if (!odpoved || !odpoved.spojeniSelhalo) return odpoved;
-    if (pokus < 3) {
-      console.warn('[WMS] ' + (params.action || '?') + ' – spojení selhalo, pokus ' + (pokus + 1));
-      await new Promise(r => setTimeout(r, 400 * pokus));
+// Sestaví adresu požadavku i s klíčem a prevencí proti cache
+function postavUrl_(params, callbackName) {
+  const vse = Object.assign({}, params, { _: Date.now() });
+  if (callbackName) vse.callback = callbackName;
+  if (state.klic) vse.klic = state.klic;
+  if (state.config.token) vse.token = state.config.token;
+
+  const qs = Object.keys(vse)
+    .filter(k => vse[k] !== undefined && vse[k] !== null && vse[k] !== '')
+    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(vse[k]))
+    .join('&');
+
+  return state.config.scriptUrl + '?' + qs;
+}
+
+// HLAVNÍ CESTA – obyčejný fetch.
+// Handoff tvrdil, že kvůli CORS nefunguje a musí se použít JSONP.
+// To už neplatí, Google mezitím hlavičky doplnil. A je to důležité:
+// JSONP načítá odpověď přes <script>, což prohlížeče s ochranou proti
+// sledování (Edge, Safari) u domény google.com blokují. Odtud pramenily
+// ty náhodné výpadky "nepodařilo se spojit".
+async function fetchJednou_(params, timeoutMs) {
+  const zacatek = Date.now();
+  const ctrl = new AbortController();
+  const budik = setTimeout(() => ctrl.abort(), timeoutMs || 45000);
+
+  try {
+    const odpoved = await fetch(postavUrl_(params, null), {
+      signal: ctrl.signal,
+      redirect: 'follow',
+    });
+    clearTimeout(budik);
+
+    const text = await odpoved.text();
+    if (!odpoved.ok) {
+      return { chyba: 'Skript odpověděl chybou ' + odpoved.status, spojeniSelhalo: true };
     }
+
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { return { chyba: 'Neočekávaná odpověď ze skriptu', spojeniSelhalo: true }; }
+
+    console.log('[WMS] ' + (params.action || '?') + ' – celkem ' + (Date.now() - zacatek) + ' ms'
+      + (data.ms ? ', z toho skript ' + data.ms + ' ms' : ''));
+
+    if (data.prihlasitZnovu) vyprselePrihlaseni();
+    return data;
+
+  } catch (e) {
+    clearTimeout(budik);
+    const vyprselo = (e.name === 'AbortError');
+    return {
+      chyba: vyprselo
+        ? 'Skript neodpověděl do ' + Math.round((timeoutMs || 45000) / 1000) + ' s'
+        : 'Spojení se skriptem selhalo',
+      casovyLimit: vyprselo,
+      spojeniSelhalo: !vyprselo,
+    };
   }
-  return { chyba: 'Nepodařilo se spojit se skriptem ani na tři pokusy' };
+}
+
+// Zkusí fetch, a kdyby přece jen selhal, sáhne po staré cestě přes JSONP.
+async function jsonp(params, timeoutMs) {
+  const prvni = await fetchJednou_(params, timeoutMs);
+  if (!prvni.spojeniSelhalo) return prvni;
+
+  console.warn('[WMS] ' + (params.action || '?') + ' – fetch selhal, zkouším JSONP');
+  const zaloha = await jsonpJednou_(params, timeoutMs);
+  if (!zaloha.spojeniSelhalo) return zaloha;
+
+  return { chyba: 'Nepodařilo se spojit se skriptem' };
 }
 
 function jsonpJednou_(params, timeoutMs) {
@@ -1774,16 +1830,7 @@ function jsonpJednou_(params, timeoutMs) {
       resolve(data || { chyba: 'Prázdná odpověď ze skriptu' });
     };
 
-    const vse = Object.assign({}, params, { callback: callbackName, _: Date.now() });
-    if (state.klic) vse.klic = state.klic;              // klíč z přihlášení
-    if (state.config.token) vse.token = state.config.token;
-
-    const qs = Object.keys(vse)
-      .filter(k => vse[k] !== undefined && vse[k] !== null && vse[k] !== '')
-      .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(vse[k]))
-      .join('&');
-
-    script.src = state.config.scriptUrl + '?' + qs;
+    script.src = postavUrl_(params, callbackName);
     script.onerror = () => {
       cleanup();
       // Označíme to, aby to nadřazená funkce mohla zkusit znovu
