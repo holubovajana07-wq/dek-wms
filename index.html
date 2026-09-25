@@ -951,7 +951,7 @@
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <div class="section-title">Pobočky čekající na výdej</div>
       <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px;min-height:auto;"
-              onclick="nactiSeznamVydeje()">Obnovit</button>
+              onclick="nactiSeznamVydeje(true)">Obnovit</button>
     </div>
     <div class="scanner-hint" id="vydej-info">Načítám…</div>
     <div class="history-list" id="vydej-pobocky"></div>
@@ -1884,13 +1884,18 @@ async function saveRecord(record) {
 // Záměrně se nečte list LOGISTIK-výdej: ten se obnovuje ručním
 // kliknutím a mohl by nabídnout PSP, které už někdo vydal.
 
-async function nactiSeznamVydeje() {
-  el('vydej-info').textContent = 'Načítám seznam…';
+async function nactiSeznamVydeje(cerstve) {
+  el('vydej-info').textContent = cerstve ? 'Načítám znovu z tabulky…' : 'Načítám seznam…';
   el('vydej-pobocky').innerHTML = '';
 
+  // Bez "cerstve" může skript odpovědět z paměti (do 5 minut) – je to
+  // podstatně rychlejší. Paměť se zahazuje při každém zápisu času,
+  // takže vydané PSP se v seznamu držet nemůže.
   const data = (state.config.demoMode || !state.config.scriptUrl)
     ? demoSeznamVydeje()
-    : await jsonp({ action: 'seznamKVydeji' }, 60000);
+    : await jsonp(cerstve
+        ? { action: 'seznamKVydeji', cerstve: '1' }
+        : { action: 'seznamKVydeji' }, 60000);
 
   if (!data || data.chyba || !data.pobocky) {
     el('vydej-info').textContent = '';
@@ -1902,7 +1907,8 @@ async function nactiSeznamVydeje() {
 
   state.vydejData = data;
   el('vydej-info').textContent =
-    data.pobocky.length + ' poboček · ' + data.celkemPsp + ' PSP na skladě';
+    data.pobocky.length + ' poboček · ' + data.celkemPsp + ' PSP na skladě'
+    + (data.zPameti ? ' · z paměti, Obnovit načte znovu' : '');
 
   if (!data.pobocky.length) {
     el('vydej-pobocky').innerHTML =
@@ -2046,6 +2052,10 @@ function demoSeznamVydeje() {
   return {
     ok: true, celkemPsp: 3,
     pobocky: [
+      { kod: 'D903', nazev: 'Ostrava Hrabová (DEPO)', pocetPsp: 1, pspList: [
+        { cisloPsp: 'PSP-903-26-00011', polozky: [
+          { idStroje: '49XE', nazev: 'Ponorný vibrátor betonu' }]},
+      ]},
       { kod: 'P200', nazev: 'Liberec', pocetPsp: 2, pspList: [
         { cisloPsp: 'PSP-200-26-00167', polozky: [
           { idStroje: '7RA8', nazev: 'AKU hřebíkovač NURON' },

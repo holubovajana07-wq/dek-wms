@@ -247,7 +247,7 @@ function doGet(e) {
       result = lookupPsp(params.psp || '');
 
     } else if (action === 'seznamKVydeji') {
-      result = getSeznamKVydeje();
+      result = getSeznamKVydeje(params.cerstve === '1');
 
     } else if (action === 'uzivatele') {
       result = getUzivatele();
@@ -329,6 +329,11 @@ function doPost(e) {
 // ~2 100 ms, přestože jde o srovnatelný počet buněk. Rozhoduje délka úseku.
 // Proto hledáme po stupních – drtivá většina skenů se trefí hned v prvním.
 const OKNA_RADKU = [400, 2000];
+
+// Kolik posledních řádků se prochází při sestavování seznamu k výdeji.
+// Vychází z toho, že na skladě nic neleží déle než měsíc (~850 řádků),
+// takže 2 500 je zhruba tříměsíční rezerva.
+const OKNO_VYDEJ = 2500;
 
 // Načte DVA bloky sloupců pro rozsah řádků odRadku..odRadku+pocet-1.
 // Dva souvislé bloky jsou rychlejší než čtyři užší – režie dotazu
@@ -526,14 +531,49 @@ function lookupPsp(psp) {
 // ručním kliknutím na "aktualizuj listy". Kdyby z něj výdej
 // vycházel, dva skladníci by mohli vydat totéž PSP dvakrát.
 // ============================================================
-function getSeznamKVydeje() {
+// Pořadí poboček: nejdřív D (depa), pak P, v obou skupinách podle čísla
+// vzestupně. Abecední řazení dávalo P100 vedle P1000 a D9 až za P200.
+function poradiPobocky_(kod) {
+  const s = String(kod || '').trim().toUpperCase();
+  const m = s.match(/^([A-Z]*)(\d+)/);
+  const pismeno = m ? m[1] : '';
+  const cislo   = m ? Number(m[2]) : 999999;
+  const vaha    = (pismeno === 'D') ? 0 : (pismeno === 'P' ? 1 : 2);
+  return { vaha: vaha, cislo: cislo, text: s };
+}
+
+function getSeznamKVydeje(cerstve, celaTabulka) {
+  const cache = CacheService.getScriptCache();
+  if (celaTabulka) cerstve = true;     // kontrolní běh se z paměti neodpovídá
+
+  // Seznam musí projít celou tabulku, což trvá pár vteřin. Držíme ho
+  // proto 5 minut v paměti – a při KAŽDÉM zápisu času ho zahazujeme,
+  // aby nemohlo dojít k tomu, že dva skladníci vydají totéž PSP.
+  if (!cerstve) {
+    const ulozeno = cache.get('seznam_vydej');
+    if (ulozeno) {
+      try {
+        const v = JSON.parse(ulozeno);
+        v.zPameti = true;
+        return v;
+      } catch (e) { /* poškozený záznam – spočítáme znovu */ }
+    }
+  }
+
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
   const c     = WMS_CONFIG.col;
-  const n     = sheet.getLastRow() - 1;
-  if (n < 1) return { ok: true, pobocky: [], celkemPsp: 0 };
+  const posledni = sheet.getLastRow();
+  if (posledni < 2) return { ok: true, pobocky: [], celkemPsp: 0 };
 
-  // Místo celé tabulky čteme dva bloky sloupců, které opravdu potřebujeme:
+  // Podle provozu nic neleží na skladě déle než měsíc (informace od CS2).
+  // Do tabulky přibývá kolem 850 řádků měsíčně, takže OKNO_VYDEJ pokrývá
+  // zhruba tři měsíce – trojnásobná rezerva.
+  // Ověřit, že se tím nic neztratí, jde funkcí porovnejOknoVydeje().
+  const odRadku = celaTabulka ? 2 : Math.max(2, posledni - OKNO_VYDEJ + 1);
+  const n = posledni - odRadku + 1;
+
+  // Čteme dva bloky sloupců, které opravdu potřebujeme:
   //   D..S  (pobočky, PSP, ID stroje, název, data svozu a odeslání)
   //   AE..  (storno a sloupce WMS)
   const A_OD = c.idVykladka;                 // 4
@@ -541,8 +581,8 @@ function getSeznamKVydeje() {
   const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
   const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
 
-  const blokA = sheet.getRange(2, A_OD, n, A_DO - A_OD + 1).getValues();
-  const blokB = sheet.getRange(2, B_OD, n, B_DO - B_OD + 1).getValues();
+  const blokA = sheet.getRange(odRadku, A_OD, n, A_DO - A_OD + 1).getValues();
+  const blokB = sheet.getRange(odRadku, B_OD, n, B_DO - B_OD + 1).getValues();
 
   const a = function (radek, sloupec) { return radek[sloupec - A_OD]; };
   const b = function (radek, sloupec) { return radek[sloupec - B_OD]; };
@@ -568,7 +608,7 @@ function getSeznamKVydeje() {
       pobocky[kod].psp[psp] = { cisloPsp: psp, datumPrijmu: naIso_(prijato), polozky: [] };
     }
     pobocky[kod].psp[psp].polozky.push({
-      radek:    i + 2,
+      radek:    odRadku + i,
       idStroje: a(rA, c.idStroje),
       nazev:    a(rA, c.nazevPolozky),
       ecPuj:    a(rA, c.ecPuj),
@@ -581,9 +621,28 @@ function getSeznamKVydeje() {
     return { kod: p.kod, nazev: p.nazev, pocetPsp: pspList.length, pspList: pspList };
   });
 
-  out.sort(function (a, b) { return a.nazev.localeCompare(b.nazev, 'cs'); });
+  out.sort(function (a, b) {
+    const x = poradiPobocky_(a.kod);
+    const y = poradiPobocky_(b.kod);
+    if (x.vaha !== y.vaha)   return x.vaha - y.vaha;     // D před P
+    if (x.cislo !== y.cislo) return x.cislo - y.cislo;   // podle čísla vzestupně
+    return x.text.localeCompare(y.text, 'cs');
+  });
 
-  return { ok: true, pobocky: out, celkemPsp: out.reduce(function (s, p) { return s + p.pocetPsp; }, 0) };
+  const vysledek = {
+    ok: true,
+    pobocky: out,
+    celkemPsp: out.reduce(function (s, p) { return s + p.pocetPsp; }, 0),
+  };
+
+  try {
+    // Kontrolní běh přes celou tabulku se do paměti neukládá –
+    // ta patří běžnému, zkrácenému hledání.
+    const text = JSON.stringify(vysledek);
+    if (!celaTabulka && text.length < 90000) cache.put('seznam_vydej', text, 300);
+  } catch (e) { /* když se nevejde, prostě se nekešuje */ }
+
+  return vysledek;
 }
 
 // Položky jednoho PSP – hledají se v už načteném bloku, tedy zadarmo.
@@ -727,6 +786,11 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
   }
 
   SpreadsheetApp.flush();
+
+  // Seznam k výdeji je teď zastaralý – zahodit, ať ho nikdo nedostane
+  // s PSP, které právě odjelo.
+  try { CacheService.getScriptCache().remove('seznam_vydej'); } catch (e) {}
+
   return { zapsanoRadku: zapsano, jizZapsano: false };
 }
 
@@ -1070,6 +1134,44 @@ function zmerFaze() {
   t = Date.now();
   sheet.getRange(2, 6, posledni - 1, 4).getValues();
   Logger.log('7. blok ' + (posledni - 1) + '×4 (celá tabulka): ' + (Date.now() - t) + ' ms');
+}
+
+// Ověří, že zkrácené hledání (OKNO_VYDEJ řádků) nevynechává žádné PSP
+// oproti průchodu celou tabulkou. Spusťte po každé větší změně v provozu
+// nebo když bude podezření, že něco ve výdeji chybí.
+function porovnejOknoVydeje() {
+  const t1 = Date.now();
+  const okno = getSeznamKVydeje(true, false);
+  const casOkno = Date.now() - t1;
+
+  const t2 = Date.now();
+  const cela = getSeznamKVydeje(true, true);
+  const casCela = Date.now() - t2;
+
+  const vOkne = {}, vCele = {};
+  okno.pobocky.forEach(function (p) {
+    p.pspList.forEach(function (x) { vOkne[x.cisloPsp] = true; });
+  });
+  cela.pobocky.forEach(function (p) {
+    p.pspList.forEach(function (x) { vCele[x.cisloPsp] = true; });
+  });
+
+  const chybi = Object.keys(vCele).filter(function (p) { return !vOkne[p]; });
+
+  Logger.log('Zkrácené hledání (' + OKNO_VYDEJ + ' řádků): '
+    + okno.celkemPsp + ' PSP za ' + casOkno + ' ms');
+  Logger.log('Celá tabulka:                    '
+    + cela.celkemPsp + ' PSP za ' + casCela + ' ms');
+  Logger.log('');
+
+  if (!chybi.length) {
+    Logger.log('✓ Zkrácené hledání nic nevynechává – je bezpečné.');
+  } else {
+    Logger.log('⚠ VE ZKRÁCENÉM HLEDÁNÍ CHYBÍ ' + chybi.length + ' PSP:');
+    Logger.log('  ' + chybi.join(', '));
+    Logger.log('Tahle PSP leží na skladě déle, než jsme čekali.');
+    Logger.log('Buď je prověřte, nebo v kódu zvyšte OKNO_VYDEJ.');
+  }
 }
 
 function testSeznamKVydeji() {
