@@ -1286,6 +1286,21 @@ function vyprselePrihlaseni() {
   }, 400);
 }
 
+function vyplnJmena_(jmena) {
+  const sel = el('inp-uzivatel');
+  const drive = sel.value;                     // co měl skladník vybrané
+
+  sel.innerHTML = '<option value="">— vyberte —</option>'
+    + jmena.map(j => `<option value="${j}">${j}</option>`).join('');
+
+  // Předvyplň toho, kdo se hlásil naposledy z téhle čtečky
+  const posledni = drive || lsGet('dek_wms_posledni_uzivatel');
+  if (posledni && jmena.indexOf(posledni) >= 0) sel.value = posledni;
+}
+
+// Seznam jmen se mění jednou za čas, ne každou minutu. Čtečka si ho
+// proto pamatuje a při dalším spuštění je přihlášení OKAMŽITÉ –
+// na pozadí se seznam jen potichu ověří a případně opraví.
 async function zobrazPrihlaseni() {
   state.pin = '';
   vykresliPin();
@@ -1293,25 +1308,38 @@ async function zobrazPrihlaseni() {
   showTab('login');
 
   const sel = el('inp-uzivatel');
-  sel.innerHTML = '<option value="">Načítám…</option>';
+
+  let ulozena = [];
+  try { ulozena = JSON.parse(lsGet('dek_wms_uzivatele') || '[]'); } catch (e) {}
+
+  if (ulozena.length) {
+    vyplnJmena_(ulozena);                      // hned, bez čekání
+  } else {
+    sel.innerHTML = '<option value="">Načítám…</option>';
+    el('login-chyba').classList.remove('chyba');
+    zobrazChybuLoginu('První spuštění – načítám seznam skladníků…');
+  }
 
   const data = (state.config.demoMode || !state.config.scriptUrl)
     ? { ok: true, uzivatele: ['DEMO skladník'] }
-    : await jsonp({ action: 'uzivatele' }, 20000);
+    : await jsonp({ action: 'uzivatele' });
 
-  if (!data || !data.uzivatele || !data.uzivatele.length) {
-    sel.innerHTML = '<option value="">— nikdo není zadán —</option>';
-    zobrazChybuLoginu((data && data.chyba)
-      || 'V tabulce nejsou žádní uživatelé. Doplňte je do listu UZIVATELE.');
+  el('login-chyba').classList.add('chyba');
+
+  if (data && data.uzivatele && data.uzivatele.length) {
+    lsSet('dek_wms_uzivatele', JSON.stringify(data.uzivatele));
+    vyplnJmena_(data.uzivatele);
+    el('login-chyba').style.display = 'none';
     return;
   }
 
-  sel.innerHTML = '<option value="">— vyberte —</option>'
-    + data.uzivatele.map(j => `<option value="${j}">${j}</option>`).join('');
+  // Když se seznam nepodařilo načíst, ale máme uložený, jede se dál z něj.
+  // PIN se stejně ověřuje na serveru, takže se tím nic neobchází.
+  if (ulozena.length) return;
 
-  // Předvyplň toho, kdo se hlásil naposledy z téhle čtečky
-  const posledni = lsGet('dek_wms_posledni_uzivatel');
-  if (posledni && data.uzivatele.indexOf(posledni) >= 0) sel.value = posledni;
+  sel.innerHTML = '<option value="">— nikdo není zadán —</option>';
+  zobrazChybuLoginu((data && data.chyba)
+    || 'V tabulce nejsou žádní uživatelé. Doplňte je do listu UZIVATELE.');
 }
 
 function vykresliPin() {
@@ -1352,7 +1380,7 @@ async function prihlasit() {
 
   const odpoved = (state.config.demoMode || !state.config.scriptUrl)
     ? { ok: true, jmeno: jmeno }
-    : await jsonp({ action: 'prihlaseni', jmeno: jmeno, pin: state.pin }, 20000);
+    : await jsonp({ action: 'prihlaseni', jmeno: jmeno, pin: state.pin });
 
   btn.textContent = 'OK';
   state.pin = '';
