@@ -434,6 +434,28 @@
     }
     .result-row-val.highlight { color: var(--red-light); }
 
+    /* ── CO JEŠTĚ MĚLO PŘIJET ── */
+    .svoz-stav {
+      font-size: 18px;
+      font-weight: 900;
+      flex-shrink: 0;
+      width: 20px;
+      text-align: center;
+      line-height: 1.2;
+    }
+    .svoz-stav.hotovo { color: var(--green); }
+    .svoz-stav.ceka   { color: var(--amber); }
+    .svoz-id {
+      color: #fff;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .svoz-id.hotovo { background: var(--green); }
+    .svoz-id.ceka   { background: var(--amber); color: #3a2600; }
+
     /* ── LOKACE INPUT ── */
     .lokace-section {
       display: flex;
@@ -919,6 +941,12 @@
     <div id="psp-polozky-section" style="display:none;">
       <div class="section-title">Všechny položky na tomto PSP</div>
       <div id="psp-polozky-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+
+    <!-- Co ještě mělo přijet stejným svozem -->
+    <div id="svoz-section" style="display:none;flex-direction:column;gap:8px;">
+      <div class="section-title" id="svoz-nadpis">Ze stejného svozu</div>
+      <div id="svoz-list" style="display:flex;flex-direction:column;gap:6px;"></div>
     </div>
 
     <!-- Lokace – jen pro příjem -->
@@ -1542,6 +1570,7 @@ async function showConfirmScreen(id) {
   el('res-cas').textContent   = formatTime(now);
   el('res-akce').textContent  = state.currentAction === 'prijem' ? '📥 Příjem na CS2' : '📤 Výdej z CS2';
   el('psp-polozky-section').style.display = 'none';
+  el('svoz-section').style.display = 'none';
   el('result-card').classList.remove('warning','success','error');
   skryjVarovani();
 
@@ -1582,6 +1611,34 @@ async function showConfirmScreen(id) {
         <span class="result-row-key" style="font-size:11px;">${p.pp || ''} ${p.polozka ? '· ' + p.polozka : ''}</span>
       </div>`;
     }).join('');
+  }
+
+  // Co ještě mělo dorazit stejným svozem – stejná pobočka, stejné datum.
+  // Skladník tak hned vidí, jestli na autě něco nezůstalo.
+  const dalsi = info.dalsiZPobocky || [];
+  if (dalsi.length) {
+    const ceka = dalsi.filter(x => !x.prijato).length;
+    const odkud = info.pobNakladka || info.idNakladka || 'téže pobočky';
+    el('svoz-nadpis').textContent = ceka
+      ? 'Ze stejného svozu (' + odkud + ') chybí ještě ' + ceka + ' z ' + dalsi.length
+      : 'Ze stejného svozu (' + odkud + ') je vše přijato';
+
+    el('svoz-list').innerHTML = dalsi.map(x => {
+      const stav = x.prijato ? 'hotovo' : 'ceka';
+      return `
+      <div class="result-row" style="align-items:flex-start;gap:8px;">
+        <span class="svoz-stav ${stav}">${x.prijato ? '✓' : '•'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="svoz-id ${stav}">${x.idStroje}</span>
+            <span class="result-row-val" style="font-size:13px;">${x.nazev || '—'}</span>
+          </div>
+          <span class="result-row-key" style="font-size:11px;">${x.cisloPsp || ''}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    el('svoz-section').style.display = 'flex';
   }
 
   // Spojení se skriptem selhalo – neschovávej to, skladník to musí vidět
@@ -1706,7 +1763,12 @@ function demoLookup(id) {
       pobNakladka: 'Praha Hostivař', idNakladka: 'P100',
       pobVykladka: 'Sokolov',        idVykladka: 'P305',
       ecPuj: 'PUJ-22-00124',
-      polozky: [{ nazev: 'Vibrační deska reverzní do 200 kg', ecPuj: 'PUJ-22-00124', polozka: 'PP00098' }]
+      polozky: [{ nazev: 'Vibrační deska reverzní do 200 kg', ecPuj: 'PUJ-22-00124', polozka: 'PP00098' }],
+      dalsiZPobocky: [
+        { idStroje: '61EJ', nazev: 'Míchač stavebních směsí 140 l', cisloPsp: 'PSP-100-26-00330', prijato: false },
+        { idStroje: '8HY3', nazev: 'Pila stolová 350–400 mm',       cisloPsp: 'PSP-100-26-00331', prijato: false },
+        { idStroje: '49XE', nazev: 'Ponorný vibrátor betonu',       cisloPsp: 'PSP-100-26-00329', prijato: true  },
+      ],
     },
     '1X7M': {
       nalezeno: true, id: '1X7M',

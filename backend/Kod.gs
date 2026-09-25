@@ -474,6 +474,7 @@ function lookupStroj(id, akce) {
     odeslanoZCS:  naIso_(hlavni.odeslanoZCS),
     polozky:      polozky,
     pocetZaznamu: radky.length,
+    dalsiZPobocky: najdiDalsiZPobocky_(b, hlavni, wms),
   };
 
   if (hlavni.storno) {
@@ -643,6 +644,57 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
   } catch (e) { /* když se nevejde, prostě se nekešuje */ }
 
   return vysledek;
+}
+
+// ============================================================
+// CO JEŠTĚ MĚLO PŘIJET Z TÉ SAMÉ POBOČKY
+// ============================================================
+// Stejný kód nakládky + stejné datum svozu = stejná jízda.
+// Hledá se v bloku, který už máme načtený z vyhledání stroje,
+// takže to nestojí žádné čtení navíc.
+// ============================================================
+
+function datumKlic_(v) {
+  if (!v) return '';
+  try {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  } catch (e) { return ''; }
+}
+
+function najdiDalsiZPobocky_(b, hlavni, wms) {
+  const c = WMS_CONFIG.col;
+  const pobocka = String(hlavni.idNakladka || '').trim().toUpperCase();
+  const datum   = datumKlic_(hlavni.datumSvozu);
+  const tento   = String(hlavni.idStroje || '').trim().toUpperCase();
+  if (!pobocka || !datum) return [];
+
+  const out = [];
+  for (let i = 0; i < b.pocet; i++) {
+    if (String(b.get(i, c.idNakladka) || '').trim().toUpperCase() !== pobocka) continue;
+    if (datumKlic_(b.get(i, c.datumSvozu)) !== datum) continue;
+    if (b.get(i, c.storno)) continue;
+
+    const id = String(b.get(i, c.idStroje) || '').trim();
+    if (!id) continue;                       // příslušenství bez ID
+    if (id.toUpperCase() === tento) continue; // ten právě naskenovaný
+
+    out.push({
+      idStroje: id,
+      nazev:    b.get(i, c.nazevPolozky),
+      cisloPsp: b.get(i, c.cisloPsp),
+      prijato:  !!(b.get(i, wms.prijem) || b.get(i, c.svezenoNaCS)),
+    });
+  }
+
+  // Nepřijaté napřed – to je to, co skladník potřebuje vidět
+  out.sort(function (x, y) {
+    if (x.prijato !== y.prijato) return x.prijato ? 1 : -1;
+    return String(x.cisloPsp).localeCompare(String(y.cisloPsp), 'cs');
+  });
+
+  return out.slice(0, 25);
 }
 
 // Položky jednoho PSP – hledají se v už načteném bloku, tedy zadarmo.
