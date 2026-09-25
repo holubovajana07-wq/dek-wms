@@ -1,6 +1,6 @@
 // ============================================================
 // DEK WMS – Google Apps Script backend
-// Verze: 3.2 | Pilotní provoz CS2
+// Verze: 3.3 | Pilotní provoz CS2
 // ============================================================
 // Pracuje nad listem DATA (databáze PSP).
 // Časy zapisuje do VLASTNÍCH sloupců "WMS příjem" / "WMS výdej",
@@ -279,7 +279,7 @@ function doGet(e) {
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '3.2', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '3.3', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };

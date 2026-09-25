@@ -1101,7 +1101,7 @@
 
     <div class="divider"></div>
     <div style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.2 – pilotní provoz CS2</div>
+      <div style="font-size:12px;color:var(--text-dim);" id="info-verze">DEK WMS – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
     </div>
   </div>
@@ -1116,6 +1116,11 @@
 // ─────────────────────────────────────────────
 //  STATE
 // ─────────────────────────────────────────────
+// Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
+// slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
+// Musí sedět s číslem, které vrací skript na ?action=ping.
+const VERZE_APP = '3.3';
+
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
   // se nenastavuje nic a políčko s URL se v nastavení ani neukazuje.
@@ -1490,6 +1495,12 @@ function showTab(name) {
   else stopScanner();
 
   if (name === 'settings') {
+    // Verze aplikace + verze skriptu. Když se rozejdou, jedna z půlek
+    // není nasazená a je to hned vidět.
+    el('info-verze').textContent = 'DEK WMS v' + VERZE_APP
+      + (state.verzeSkriptu ? ' · skript v' + state.verzeSkriptu : '')
+      + ' – pilotní provoz CS2';
+
     // Když adresa přišla z konfigurace.js, políčka na ni se neukazují –
     // jinak by vznikl dojem, že se dá na čtečce přenastavit.
     el('blok-pripojeni').style.display = jeUrlZKodu() ? 'none' : 'block';
@@ -1879,6 +1890,8 @@ async function fetchJednou_(params, timeoutMs) {
 
     console.log('[WMS] ' + (params.action || '?') + ' – celkem ' + (Date.now() - zacatek) + ' ms'
       + (data.ms ? ', z toho skript ' + data.ms + ' ms' : ''));
+
+    if (data.verze) state.verzeSkriptu = data.verze;   // pro zobrazení v nastavení
 
     if (data.prihlasitZnovu) vyprselePrihlaseni();
     return data;
