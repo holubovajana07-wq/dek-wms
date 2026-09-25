@@ -31,6 +31,19 @@
     background: #C8281A; color: #fff; border: none; border-radius: 8px; cursor: pointer;
   }
 
+  .odkaz-aplikace {
+    display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+    padding: 16px; margin-bottom: 24px;
+    border: 2px solid #C8281A; border-radius: 10px; background: #fff6f5;
+  }
+  .odkaz-qr { flex-shrink: 0; }
+  .odkaz-nadpis { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
+  .odkaz-text { font-size: 13px; color: #444; line-height: 1.5; max-width: 420px; }
+  .odkaz-url {
+    font-family: Consolas, monospace; font-size: 11px; color: #777;
+    margin-top: 8px; word-break: break-all;
+  }
+
   .mrizka {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -68,6 +81,19 @@
 <h1>DEK WMS – testovací QR kódy</h1>
 <div class="podnadpis">
   Naskenujte z obrazovky nebo vytiskněte. Kód obsahuje jen ID stroje, stejně jako štítky na strojích.
+</div>
+
+<div class="odkaz-aplikace">
+  <div class="odkaz-qr" id="qr-aplikace"></div>
+  <div>
+    <div class="odkaz-nadpis">📲 Odkaz na aplikaci</div>
+    <div class="odkaz-text">
+      Na čtečce otevřete <strong>Chrome</strong>, klepněte do adresního řádku
+      a naskenujte tenhle kód — adresa se vypíše sama. Pak Enter a
+      <strong>⋮ → Přidat na plochu</strong>.
+    </div>
+    <div class="odkaz-url" id="odkaz-url"></div>
+  </div>
 </div>
 
 <div class="vlastni">
@@ -148,6 +174,22 @@ document.getElementById('vlastni-id').addEventListener('keydown', function (e) {
 });
 
 STROJE.forEach(pridejKartu);
+
+// QR s adresou aplikace – ať se na čtečce nemusí ťukat ručně.
+// Odvozuje se z adresy téhle stránky, takže platí i kdyby se repozitář
+// jmenoval jinak nebo se přesunul.
+// Když stránka běží na webu, adresa se odvodí sama (platí i po přejmenování
+// repozitáře). Při otevření souboru z disku se použije ta známá.
+const ADRESA_APLIKACE = location.protocol.indexOf('http') === 0
+  ? location.href.replace(/qr-test\.html.*$/, '')
+  : 'https://holubovajana07-wq.github.io/dek-wms/';
+document.getElementById('odkaz-url').textContent = ADRESA_APLIKACE;
+new QRCode(document.getElementById('qr-aplikace'), {
+  text: ADRESA_APLIKACE,
+  width: 140,
+  height: 140,
+  correctLevel: QRCode.CorrectLevel.M,
+});
 </script>
 
 </body>
