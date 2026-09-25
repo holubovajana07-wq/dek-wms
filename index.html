@@ -1646,6 +1646,7 @@ function jsonp(params, timeoutMs) {
     const timeout = setTimeout(() => {
       cleanup();
       resolve({
+        casovyLimit: true,
         chyba: 'Skript neodpověděl do ' + Math.round(cekat / 1000)
                + ' s (akce: ' + (params.action || '?') + ')'
       });
@@ -1803,7 +1804,7 @@ async function confirmMove() {
     prepsat:     state.prepsatPotvrzeno === state.currentNonce,
   };
 
-  const odpoved = await saveRecord(record) || {};
+  const odpoved = await ulozSOverenim(record);
 
   btn.disabled = false;
   btn.innerHTML = '✓ Potvrdit pohyb';
@@ -1998,7 +1999,7 @@ async function potvrditVydej() {
       nonce:       'vydej-' + cisloPsp + '-' + Date.now(),
     };
 
-    const odpoved = await saveRecord(record) || {};
+    const odpoved = await ulozSOverenim(record);
     if (odpoved.ok) {
       hotovo.push(cisloPsp);
       // do historie ukládáme číslo PSP jako identifikaci (stroj se neskenoval)
@@ -2058,6 +2059,48 @@ function demoSeznamVydeje() {
       ]},
     ]
   };
+}
+
+// ─────────────────────────────────────────────
+//  ULOŽENÍ S OVĚŘENÍM
+// ─────────────────────────────────────────────
+// Nedoručená odpověď NEZNAMENÁ, že se zápis nepovedl – skript mohl
+// v klidu dopsat a ztratit se mohla až cesta zpátky. Proto se v takovém
+// případě zeptáme tabulky, jak to doopravdy dopadlo.
+//
+// Tvrdit "NEULOŽENO" bez ověření je stejná chyba jako tvrdit "uloženo"
+// bez ověření – jen obráceně.
+
+async function ulozSOverenim(record) {
+  const odpoved = await saveRecord(record) || {};
+  if (!odpoved.casovyLimit) return odpoved;
+
+  const stav = await overZapis(record);
+  if (stav.znamo && stav.ulozeno) {
+    return { ok: true, overeno: true, zprava: 'Uloženo (ověřeno dodatečně)' };
+  }
+  if (stav.znamo) {
+    return { ok: false, chyba: 'Zápis neproběhl – ověřeno v tabulce. Zkuste to znovu.' };
+  }
+  return { ok: false, chyba: 'Odpověď nedorazila a stav se nepodařilo ověřit. Zkontrolujte tabulku.' };
+}
+
+// Podívá se do tabulky, jestli tam čas opravdu je
+async function overZapis(record) {
+  if (!record.psp) return { znamo: false };
+
+  const info = await jsonp({ action: 'lookupPsp', psp: record.psp }, 45000);
+  if (!info || info.chyba || !info.polozky || !info.polozky.length) return { znamo: false };
+
+  const hledanyId = String(record.id || '').trim().toUpperCase();
+  const radky = hledanyId
+    ? info.polozky.filter(p => String(p.idStroje || '').trim().toUpperCase() === hledanyId)
+    : info.polozky;
+
+  if (!radky.length) return { znamo: false };
+
+  const ulozeno = radky.some(p => record.akce === 'prijem' ? !!p.wmsPrijem : !!p.wmsVydej);
+  return { znamo: true, ulozeno: ulozeno };
 }
 
 // ─────────────────────────────────────────────

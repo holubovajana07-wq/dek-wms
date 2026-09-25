@@ -102,6 +102,10 @@ listenerem, nemusí být aktivní žádné pole. Malý displej → velká tlač�
 
 1. **Nikdy nehlásit úspěch, který se nestal.** Verze 1.0 vracela „uloženo"
    vždycky, i při chybě. Skladník podle toho řídil sklad.
+   **A stejně tak nehlásit neúspěch, který se nestal.** Nedoručená odpověď
+   neznamená, že zápis selhal – skript mohl dopsat a ztratit se mohla až
+   cesta zpátky. Po vypršení limitu se proto stav **ověřuje dotazem**
+   (`ulozSOverenim` → `overZapis`), teprve pak se hlásí výsledek.
 2. **Čas se zapisuje po řádcích, ne po celém PSP.** Když z PSP přijedou 2 stroje
    ze 3, nesmí se označit všechny tři jako přijaté.
 3. **Nesahat na cizí sloupce.** R a S patří jiné automatizaci – jen číst.
