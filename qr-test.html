@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEK WMS – testovací QR kódy</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: #fff;
+    color: #111;
+    margin: 0;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .podnadpis { color: #666; font-size: 13px; margin-bottom: 20px; }
+
+  .vlastni {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 24px; padding: 14px;
+    background: #f4f4f6; border-radius: 10px;
+  }
+  .vlastni input {
+    flex: 1; min-width: 180px; padding: 10px 12px; font-size: 16px;
+    border: 1.5px solid #ccc; border-radius: 8px;
+  }
+  .vlastni button {
+    padding: 10px 18px; font-size: 15px; font-weight: 700;
+    background: #C8281A; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+
+  .mrizka {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 16px;
+  }
+  .karta {
+    border: 1.5px solid #ddd;
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+    break-inside: avoid;
+  }
+  .karta .kod canvas, .karta .kod img { margin: 0 auto; }
+  .id {
+    font-size: 26px; font-weight: 900; letter-spacing: 3px;
+    margin-top: 10px; font-variant-numeric: tabular-nums;
+  }
+  .nazev { font-size: 12px; color: #555; margin-top: 3px; line-height: 1.3; }
+  .psp   { font-size: 11px; color: #999; margin-top: 4px; }
+
+  .poznamka {
+    margin-top: 24px; padding: 14px; background: #fff8e6;
+    border-left: 4px solid #f39c12; border-radius: 6px;
+    font-size: 13px; line-height: 1.5;
+  }
+
+  @media print {
+    .vlastni, .poznamka, .podnadpis { display: none; }
+    body { padding: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>DEK WMS – testovací QR kódy</h1>
+<div class="podnadpis">
+  Naskenujte z obrazovky nebo vytiskněte. Kód obsahuje jen ID stroje, stejně jako štítky na strojích.
+</div>
+
+<div class="vlastni">
+  <input id="vlastni-id" placeholder="Vlastní ID stroje (např. 9JT9)" maxlength="10" autocomplete="off">
+  <button onclick="pridejVlastni()">Vytvořit QR</button>
+</div>
+
+<div class="mrizka" id="mrizka"></div>
+
+<div class="poznamka">
+  <strong>Jak testovat:</strong> v aplikaci otevřete <strong>PŘÍJEM</strong>, namiřte skener na QR
+  a zmáčkněte spoušť. Do ničeho neklikejte – aplikace odchytává skener sama.
+  <br><br>
+  Když se po skenu nic nestane, skener nejspíš neposílá Enter. Nastavuje se to v aplikaci
+  skeneru na čtečce (<em>Scanner Settings → Suffix → Enter</em>).
+</div>
+
+<script>
+// Stroje z listu DATA, které byly v době přípravy ještě nepřijaté.
+// Až se přijmou, vytvořte si nové pomocí pole nahoře, nebo
+// spusťte v Apps Scriptu funkci najdiTestovaciStroj().
+const STROJE = [
+  { id: '8SU1', nazev: 'Ventilátor průmyslový 500 mm MASTER DF 20 P', psp: 'PSP-700-26-00462', radek: 7520 },
+  { id: '8RJ5', nazev: 'Ventilátor průmyslový 500 mm MASTER DF 20 P', psp: 'PSP-700-26-00462', radek: 7519 },
+  { id: '7PK8', nazev: 'Ventilátor průmyslový 500 mm MASTER DF 20 P', psp: 'PSP-700-26-00462', radek: 7518 },
+  { id: '9T2D', nazev: 'Vysavač průmyslový 40–60 l/s',                psp: 'PSP-700-26-00461', radek: 7515 },
+  { id: '18SB', nazev: 'Vysavač průmyslový 40–60 l/s',                psp: 'PSP-700-26-00461', radek: 7512 },
+];
+
+function pridejKartu(stroj) {
+  const karta = document.createElement('div');
+  karta.className = 'karta';
+
+  const kod = document.createElement('div');
+  kod.className = 'kod';
+  karta.appendChild(kod);
+
+  const id = document.createElement('div');
+  id.className = 'id';
+  id.textContent = stroj.id;
+  karta.appendChild(id);
+
+  if (stroj.nazev) {
+    const n = document.createElement('div');
+    n.className = 'nazev';
+    n.textContent = stroj.nazev;
+    karta.appendChild(n);
+  }
+  if (stroj.psp) {
+    const p = document.createElement('div');
+    p.className = 'psp';
+    // Číslo řádku se hodí při kontrole – v listu DATA se pak nemusí hledat
+    p.textContent = stroj.psp + (stroj.radek ? ' · řádek ' + stroj.radek : '');
+    karta.appendChild(p);
+  }
+
+  document.getElementById('mrizka').appendChild(karta);
+
+  new QRCode(kod, {
+    text: stroj.id,
+    width: 150,
+    height: 150,
+    correctLevel: QRCode.CorrectLevel.H,
+  });
+}
+
+function pridejVlastni() {
+  const pole = document.getElementById('vlastni-id');
+  const hodnota = pole.value.trim().toUpperCase();
+  if (!hodnota) return;
+  pridejKartu({ id: hodnota, nazev: 'Vlastní kód', psp: '' });
+  pole.value = '';
+  pole.focus();
+}
+
+document.getElementById('vlastni-id').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') pridejVlastni();
+});
+
+STROJE.forEach(pridejKartu);
+</script>
+
+</body>
+</html>

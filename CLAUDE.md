@@ -106,6 +106,20 @@ Položky bez ID stroje (sl. I prázdné) jsou příslušenství a párují se p�
 klávesnice (HID): načte kód a stiskne Enter. Aplikace to odchytává globálním
 listenerem, nemusí být aktivní žádné pole. Malý displej → velká tlačítka.
 
+## Rychlost – proč je to postavené takhle
+
+Jedno kolečko k Apps Scriptu stojí u DEKu **1,8–10 s** (měřeno), přičemž
+samotný skript počítá jednotky milisekund. Zkracovat výpočet tedy nemá smysl –
+platí se za cestu, ne za práci.
+
+Proto si čtečka po přihlášení stáhne **index čekaných strojů** (`action=index`)
+a sken se vyhledává lokálně – **~20 ms místo ~10 s**. Server se ptá jen tehdy,
+když stroj v indexu není (už přijatý, nebo starší než okno 2 500 řádků).
+
+> Index obsahuje **jen stroje bez zapsaného příjmu**. Zastaralý index proto
+> nemůže způsobit dvojí zápis: souběh zachytí server při ukládání a vrátí
+> „už přijato". Index se navíc zahazuje při každém zápisu (server i čtečka).
+
 ## Zásadní pravidla
 
 1. **Nikdy nehlásit úspěch, který se nestal.** Verze 1.0 vracela „uloženo"

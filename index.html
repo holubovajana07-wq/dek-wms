@@ -1134,6 +1134,12 @@ const state = {
   uzivatel: null,            // přihlášený skladník (jméno)
   klic: null,                // přístupový klíč vydaný při přihlášení
   pin: '',                   // rozepsaný PIN na přihlašovací obrazovce
+  index: null,               // stroje čekané na příjem, id → záznam
+  indexSeznam: null,         // totéž jako pole, pro hledání podle svozu
+  indexCas: null,            // kdy byl index pořízen
+  indexCasovac: null,        // průběžné obnovování indexu
+  vydejCasovac: null,        // průběžné obnovování seznamu k výdeji
+  vydejNacteno: null,        // kdy byl seznam k výdeji naposledy načten
   vydejData: null,           // seznam poboček načtený ze serveru
   vydejPobocka: null,        // právě otevřená pobočka
   vydejVybrane: {},          // zaškrtnutá PSP k výdeji
@@ -1249,6 +1255,12 @@ function spustAplikaci() {
   el('badge-loc').textContent = state.config.location;
   zobrazUzivatele();
   jdiNaPrijem();
+
+  // Seznam čekaných strojů: nejdřív ten uložený (okamžitě použitelný),
+  // pak se na pozadí stáhne čerstvý. Skladník na nic nečeká.
+  nactiIndexZPameti();
+  stahniIndex();
+  spustObnovovaniIndexu();
 }
 
 // ─────────────────────────────────────────────
@@ -1444,6 +1456,22 @@ function jdiNaVydej() {
   state.currentAction = 'vydej';
   showTab('vydej');
   nactiSeznamVydeje();
+  spustObnovovaniVydeje();
+}
+
+// Když skladník nakládá auto, má seznam dlouho otevřený na displeji.
+// Mezitím kolega přijímá další stroje – tak ať mu přibývají před očima.
+// Obnovuje se jen na obrazovce výdeje, jinde by to bylo zbytečné.
+const INTERVAL_VYDEJE = 30 * 1000;
+
+function spustObnovovaniVydeje() {
+  if (state.vydejCasovac) clearInterval(state.vydejCasovac);
+  state.vydejCasovac = setInterval(function () {
+    if (document.hidden) return;
+    if (!el('screen-vydej').classList.contains('active')) return;   // jen seznam poboček
+    if (Object.keys(state.vydejVybrane || {}).length) return;        // nepřepisovat rozdělanou práci
+    nactiSeznamVydeje();
+  }, INTERVAL_VYDEJE);
 }
 
 function showTab(name) {
@@ -1637,11 +1665,99 @@ async function showConfirmScreen(id) {
   el('btn-bez-dokladu').style.display  = isPrijem ? 'flex' : 'none';
   renderLokacePresets();
 
-  // Lookup from sheets (or demo data)
+  // 1) Nejdřív se podívej do indexu v čtečce – je to okamžité.
+  //    Když tam stroj je, znamená to, že čeká na příjem, a nemusíme
+  //    se nikam ptát. Případný souběh zachytí server při zápisu.
+  const zIndexu = isPrijem ? najdiVIndexu(id) : null;
+  if (zIndexu) {
+    const info = {
+      nalezeno:      true,
+      id:            zIndexu.id,
+      nazev:         zIndexu.nazev,
+      cisloPsp:      zIndexu.psp,
+      idNakladka:    zIndexu.kodZ,
+      pobNakladka:   zIndexu.pobZ,
+      idVykladka:    zIndexu.kodDo,
+      pobVykladka:   zIndexu.pobDo,
+      radek:         zIndexu.radek,
+      dalsiZPobocky: dalsiZeSvozu(zIndexu).map(s => ({
+        idStroje: s.id, nazev: s.nazev, cisloPsp: s.psp, prijato: false,
+      })),
+      polozky: [],
+      zIndexu: true,
+    };
+    state.currentInfo = info;
+    vykresliKartuStroje_(info, id);
+
+    // Kartu má skladník hned, ale ověříme ji na serveru na pozadí –
+    // kolega mohl stroj mezitím přijmout. Než vybere lokaci, víme to.
+    overStavNaPozadi_(id);
+    return;
+  }
+
+  // 2) V indexu není – buď je už přijatý, nebo je to starší přesun.
+  //    Teprve tady se ptáme serveru.
+  const info = await lookupStroj(id);
+  state.currentInfo = info;
+  vykresliKartuStroje_(info, id);
+}
+
+// Ověření na pozadí: kartu už skladník vidí, tohle jen doplní pravdu
+// ze serveru. Kdyby stroj mezitím přijal kolega, objeví se varování
+// dřív, než skladník stihne vybrat lokaci a potvrdit.
+async function overStavNaPozadi_(id) {
   const info = await lookupStroj(id);
 
-  // Ulož info do state pro pozdější uložení
+  // Mezitím mohl skladník odskočit jinam nebo naskenovat něco jiného
+  if (state.currentId !== id) return;
+  if (!el('screen-confirm').classList.contains('active')) return;
+  if (!info || info.chyba) return;            // chybu spojení tu neřešíme, karta platí
+
   state.currentInfo = info;
+
+  // Přesnější seznam ze svozu – server zná i to, co už přijato je
+  if (info.dalsiZPobocky) vykresliSvoz_(info);
+
+  if (info.varovani) {
+    el('result-card').classList.add('warning');
+    zobrazVarovani(info.varovani, false);
+    // Stroj už přijatý někým jiným – ven z indexu, ať to nemate dál
+    if (info.casPrijmu) odeberZIndexu(id);
+  }
+}
+
+// Co ještě mělo dorazit stejným svozem – stejná pobočka, stejné datum.
+// Skladník tak hned vidí, jestli na autě něco nezůstalo.
+function vykresliSvoz_(info) {
+  const dalsi = info.dalsiZPobocky || [];
+  if (!dalsi.length) { el('svoz-section').style.display = 'none'; return; }
+
+  const ceka  = dalsi.filter(x => !x.prijato).length;
+  const odkud = info.pobNakladka || info.idNakladka || 'téže pobočky';
+
+  el('svoz-nadpis').textContent = ceka
+    ? 'Ze stejného svozu (' + odkud + ') chybí ještě ' + ceka + ' z ' + dalsi.length
+    : 'Ze stejného svozu (' + odkud + ') je vše přijato';
+
+  el('svoz-list').innerHTML = dalsi.map(x => {
+    const stav = x.prijato ? 'hotovo' : 'ceka';
+    return `
+      <div class="result-row" style="align-items:flex-start;gap:8px;">
+        <span class="svoz-stav ${stav}">${x.prijato ? '✓' : '•'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="svoz-id ${stav}">${x.idStroje}</span>
+            <span class="result-row-val" style="font-size:13px;">${x.nazev || '—'}</span>
+          </div>
+          <span class="result-row-key" style="font-size:11px;">${x.cisloPsp || ''}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  el('svoz-section').style.display = 'flex';
+}
+
+function vykresliKartuStroje_(info, id) {
 
   el('res-name').textContent  = info.nazev       || 'Stroj nenalezen v evidenci';
   el('res-psp').textContent   = info.cisloPsp    || info.psp || 'Bez PSP';
@@ -1671,33 +1787,7 @@ async function showConfirmScreen(id) {
     }).join('');
   }
 
-  // Co ještě mělo dorazit stejným svozem – stejná pobočka, stejné datum.
-  // Skladník tak hned vidí, jestli na autě něco nezůstalo.
-  const dalsi = info.dalsiZPobocky || [];
-  if (dalsi.length) {
-    const ceka = dalsi.filter(x => !x.prijato).length;
-    const odkud = info.pobNakladka || info.idNakladka || 'téže pobočky';
-    el('svoz-nadpis').textContent = ceka
-      ? 'Ze stejného svozu (' + odkud + ') chybí ještě ' + ceka + ' z ' + dalsi.length
-      : 'Ze stejného svozu (' + odkud + ') je vše přijato';
-
-    el('svoz-list').innerHTML = dalsi.map(x => {
-      const stav = x.prijato ? 'hotovo' : 'ceka';
-      return `
-      <div class="result-row" style="align-items:flex-start;gap:8px;">
-        <span class="svoz-stav ${stav}">${x.prijato ? '✓' : '•'}</span>
-        <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="svoz-id ${stav}">${x.idStroje}</span>
-            <span class="result-row-val" style="font-size:13px;">${x.nazev || '—'}</span>
-          </div>
-          <span class="result-row-key" style="font-size:11px;">${x.cisloPsp || ''}</span>
-        </div>
-      </div>`;
-    }).join('');
-
-    el('svoz-section').style.display = 'flex';
-  }
+  vykresliSvoz_(info);
 
   // Spojení se skriptem selhalo – neschovávej to, skladník to musí vidět
   if (info.chyba) {
@@ -2037,6 +2127,14 @@ async function confirmMove() {
   }
 
   flashSuccess();
+
+  // Stroj je přijatý – z indexu v čtečce pryč, ať se neukazuje jako čekaný.
+  // Na pozadí se index ještě obnoví ze serveru.
+  if (isPrijem && record.id) {
+    odeberZIndexu(record.id);
+    stahniIndex();
+  }
+
   state.history.unshift(record);
   lsSet('dek_wms_history', JSON.stringify(state.history.slice(0, 100)));
   renderHistory();
@@ -2116,9 +2214,12 @@ async function nactiSeznamVydeje(cerstve) {
   }
 
   state.vydejData = data;
+  state.vydejNacteno = new Date();
+
+  // Čas načtení je vidět, ať skladník ví, jak starý seznam má před sebou
   el('vydej-info').textContent =
     data.pobocky.length + ' poboček · ' + data.celkemPsp + ' PSP na skladě'
-    + (data.zPameti ? ' · z paměti, Obnovit načte znovu' : '');
+    + ' · aktuální k ' + formatTime(state.vydejNacteno);
 
   if (!data.pobocky.length) {
     el('vydej-pobocky').innerHTML =
@@ -2279,6 +2380,105 @@ function demoSeznamVydeje() {
       ]},
     ]
   };
+}
+
+// ─────────────────────────────────────────────
+//  INDEX ČEKANÝCH STROJŮ V ČTEČCE
+// ─────────────────────────────────────────────
+// Jedno kolečko k Apps Scriptu stojí ~1,8 s. Proto si čtečka stáhne
+// seznam strojů čekaných na příjem a sken pak vyhledá u sebe – okamžitě.
+//
+// V indexu jsou JEN stroje, které ještě nemají zapsaný příjem. Když
+// tam stroj je, víme, že je k přijetí. Kdyby ho mezitím přijal někdo
+// jiný, zachytí to server při zápisu a ohlásí "už přijato" – takže
+// zastaralý index nemůže způsobit dvojí zápis.
+
+const POLE_INDEXU = ['id','nazev','psp','kodZ','pobZ','kodDo','pobDo','datumSvozu','radek'];
+
+function zpracujIndex_(data) {
+  const pole  = data.pole || POLE_INDEXU;
+  const mapa  = {};
+  (data.stroje || []).forEach(radek => {
+    const o = {};
+    pole.forEach((klic, i) => { o[klic] = radek[i]; });
+    if (o.id) mapa[String(o.id).trim().toUpperCase()] = o;
+  });
+  state.index = mapa;
+  state.indexSeznam = Object.keys(mapa).map(k => mapa[k]);
+  state.indexCas = data.cas || null;
+}
+
+function nactiIndexZPameti() {
+  try {
+    const ulozeno = JSON.parse(lsGet('dek_wms_index') || 'null');
+    if (ulozeno && ulozeno.stroje) { zpracujIndex_(ulozeno); return true; }
+  } catch (e) {}
+  return false;
+}
+
+async function stahniIndex(cerstve) {
+  if (state.config.demoMode || !state.config.scriptUrl) return;
+
+  const data = await jsonp(cerstve ? { action: 'index', cerstve: '1' } : { action: 'index' });
+  if (!data || !data.stroje) return;
+
+  zpracujIndex_(data);
+  try {
+    lsSet('dek_wms_index', JSON.stringify({
+      pole: data.pole, stroje: data.stroje, cas: data.cas,
+    }));
+  } catch (e) {}
+  console.log('[WMS] index – ' + data.pocet + ' strojů čekaných na příjem');
+}
+
+function najdiVIndexu(id) {
+  if (!state.index) return null;
+  return state.index[String(id || '').trim().toUpperCase()] || null;
+}
+
+// Na skladě pracuje víc skladníků najednou, takže uložený seznam rychle
+// zastarává – kolega přijme stroj a naše čtečka o tom neví.
+// Proto se index obnovuje průběžně na pozadí. Skladník o tom neví,
+// nic se tím nezdržuje; jen se pošle jeden požadavek.
+const INTERVAL_INDEXU = 45 * 1000;
+
+function spustObnovovaniIndexu() {
+  if (state.indexCasovac) clearInterval(state.indexCasovac);
+  state.indexCasovac = setInterval(function () {
+    if (document.hidden) return;              // na pozadí to nemá smysl
+    stahniIndex();
+  }, INTERVAL_INDEXU);
+}
+
+// Stroj byl přijat – z indexu pryč, ať se příště neukazuje jako čekaný
+function odeberZIndexu(id) {
+  const klic = String(id || '').trim().toUpperCase();
+  if (!state.index || !state.index[klic]) return;
+  delete state.index[klic];
+  state.indexSeznam = Object.keys(state.index).map(k => state.index[k]);
+  try {
+    const ulozeno = JSON.parse(lsGet('dek_wms_index') || 'null');
+    if (ulozeno && ulozeno.stroje) {
+      ulozeno.stroje = ulozeno.stroje.filter(r => String(r[0]).trim().toUpperCase() !== klic);
+      lsSet('dek_wms_index', JSON.stringify(ulozeno));
+    }
+  } catch (e) {}
+}
+
+// Co ještě mělo dorazit stejným svozem – počítá se z indexu, bez serveru
+function dalsiZeSvozu(zaznam) {
+  if (!state.indexSeznam || !zaznam) return [];
+  const pobocka = String(zaznam.kodZ || '').trim().toUpperCase();
+  const datum   = String(zaznam.datumSvozu || '');
+  const tento   = String(zaznam.id || '').trim().toUpperCase();
+  if (!pobocka || !datum) return [];
+
+  return state.indexSeznam
+    .filter(s =>
+      String(s.kodZ || '').trim().toUpperCase() === pobocka &&
+      String(s.datumSvozu || '') === datum &&
+      String(s.id || '').trim().toUpperCase() !== tento)
+    .slice(0, 25);
 }
 
 // ─────────────────────────────────────────────
@@ -2445,6 +2645,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopScanner();
   } else {
+    // Čtečka se probrala – seznam mohl mezitím zastarat
+    if (state.uzivatel) stahniIndex();
     const activeScan = el('screen-scan').classList.contains('active');
     if (activeScan) setTimeout(startScanner, 300);
   }

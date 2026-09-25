@@ -249,6 +249,9 @@ function doGet(e) {
     } else if (action === 'seznamKVydeji') {
       result = getSeznamKVydeje(params.cerstve === '1');
 
+    } else if (action === 'index') {
+      result = getIndexPrijem(params.cerstve === '1');
+
     } else if (action === 'uzivatele') {
       result = getUzivatele();
 
@@ -640,9 +643,95 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
   try {
     // Kontrolní běh přes celou tabulku se do paměti neukládá –
     // ta patří běžnému, zkrácenému hledání.
+    // Jen 60 s. Příjem přes WMS paměť zahodí sám, takže tohle pokrývá
+    // hlavně případ, kdy stroj označí jako svezený ta druhá automatizace
+    // (sloupec R) – o tom WMS neví a jinak by to mohl minout.
     const text = JSON.stringify(vysledek);
-    if (!celaTabulka && text.length < 90000) cache.put('seznam_vydej', text, 300);
+    if (!celaTabulka && text.length < 90000) cache.put('seznam_vydej', text, 60);
   } catch (e) { /* když se nevejde, prostě se nekešuje */ }
+
+  return vysledek;
+}
+
+// ============================================================
+// INDEX ČEKANÝCH STROJŮ – ke stažení do čtečky
+// ============================================================
+// Jedno kolečko k Apps Scriptu stojí kolem 1,8 s a zkrátit se nedá.
+// Proto si čtečka jednou stáhne seznam strojů čekaných na příjem
+// a každý sken pak vyhledá u sebe – okamžitě a i bez signálu.
+//
+// Posílá se jako pole polí (ne pojmenované objekty), aby byl přenos
+// co nejmenší. Pořadí sloupců drží POLE_INDEXU.
+// ============================================================
+
+const POLE_INDEXU = ['id', 'nazev', 'psp', 'kodZ', 'pobZ', 'kodDo', 'pobDo', 'datumSvozu', 'radek'];
+
+function getIndexPrijem(cerstve) {
+  const cache = CacheService.getScriptCache();
+  if (!cerstve) {
+    const ulozeno = cache.get('index_prijem');
+    if (ulozeno) {
+      try {
+        const v = JSON.parse(ulozeno);
+        v.zPameti = true;
+        return v;
+      } catch (e) { /* spočítáme znovu */ }
+    }
+  }
+
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+  const posledni = sheet.getLastRow();
+  if (posledni < 2) return { ok: true, pole: POLE_INDEXU, pocet: 0, stroje: [] };
+
+  const odRadku = Math.max(2, posledni - OKNO_VYDEJ + 1);
+  const n = posledni - odRadku + 1;
+
+  const A_OD = c.idNakladka, A_DO = c.odeslanoZCS;
+  const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
+  const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
+
+  const blokA = sheet.getRange(odRadku, A_OD, n, A_DO - A_OD + 1).getValues();
+  const blokB = sheet.getRange(odRadku, B_OD, n, B_DO - B_OD + 1).getValues();
+  const a = function (r, s) { return r[s - A_OD]; };
+  const b = function (r, s) { return r[s - B_OD]; };
+
+  const stroje = [];
+  for (let i = 0; i < n; i++) {
+    const rA = blokA[i], rB = blokB[i];
+    if (b(rB, c.storno)) continue;
+    if (b(rB, wms.prijem)) continue;          // už přijato – do indexu nepatří
+    if (a(rA, c.svezenoNaCS)) continue;
+
+    const id = String(a(rA, c.idStroje) || '').trim();
+    if (!id) continue;                        // příslušenství bez ID
+
+    stroje.push([
+      id,
+      String(a(rA, c.nazevPolozky) || ''),
+      String(a(rA, c.cisloPsp)     || ''),
+      String(a(rA, c.idNakladka)   || ''),
+      String(a(rA, c.pobNakladka)  || ''),
+      String(a(rA, c.idVykladka)   || ''),
+      String(a(rA, c.pobVykladka)  || ''),
+      datumKlic_(a(rA, c.datumSvozu)),
+      odRadku + i,
+    ]);
+  }
+
+  const vysledek = {
+    ok:     true,
+    pole:   POLE_INDEXU,
+    pocet:  stroje.length,
+    cas:    new Date().toISOString(),
+    stroje: stroje,
+  };
+
+  try {
+    const text = JSON.stringify(vysledek);
+    if (text.length < 90000) cache.put('index_prijem', text, 300);
+  } catch (e) {}
 
   return vysledek;
 }
@@ -855,9 +944,11 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
 
   SpreadsheetApp.flush();
 
-  // Seznam k výdeji je teď zastaralý – zahodit, ať ho nikdo nedostane
-  // s PSP, které právě odjelo.
-  try { CacheService.getScriptCache().remove('seznam_vydej'); } catch (e) {}
+  // Oba uložené seznamy jsou teď zastaralé – zahodit, ať nikdo nedostane
+  // PSP, které právě odjelo, ani stroj, který je už přijatý.
+  try {
+    CacheService.getScriptCache().removeAll(['seznam_vydej', 'index_prijem']);
+  } catch (e) {}
 
   return { zapsanoRadku: zapsano, jizZapsano: false };
 }
@@ -1320,6 +1411,19 @@ function porovnejOknoVydeje() {
     Logger.log('Tahle PSP leží na skladě déle, než jsme čekali.');
     Logger.log('Buď je prověřte, nebo v kódu zvyšte OKNO_VYDEJ.');
   }
+}
+
+// Kolik strojů se čeká na příjem a jak velký je přenos do čtečky
+function testIndex() {
+  const t = Date.now();
+  const v = getIndexPrijem(true);
+  const velikost = JSON.stringify(v).length;
+  Logger.log('Strojů čekaných na příjem: ' + v.pocet);
+  Logger.log('Velikost přenosu: ' + Math.round(velikost / 1024) + ' kB');
+  Logger.log('Spočítáno za: ' + (Date.now() - t) + ' ms');
+  v.stroje.slice(0, 5).forEach(function (s) {
+    Logger.log('  ' + s[0] + '  ' + s[2] + '  ' + s[1]);
+  });
 }
 
 function testSeznamKVydeji() {
