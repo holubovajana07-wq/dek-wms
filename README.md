@@ -68,6 +68,21 @@ Přístupový token). Jinak se čtečka ke skriptu nedostane.
 
 ---
 
+## Instalace na čtečku jako aplikace
+
+Aplikace je PWA – dá se nainstalovat na plochu a pak se chová jako běžná
+android aplikace: vlastní ikona, celá obrazovka bez adresního řádku,
+naběhne i bez signálu.
+
+1. Na čtečce otevřít v Chromu `https://holubovajana07-wq.github.io/dek-wms/`
+2. Menu **⋮** → **Přidat na plochu** (nebo *Nainstalovat aplikaci*)
+3. Potvrdit název **DEK WMS**
+4. Spouštět už jen přes ikonu na ploše, ne přes prohlížeč
+
+Aktualizace se stahují samy – při každém spuštění se aplikace pokusí načíst
+novou verzi ze sítě a pokud není signál, použije tu uloženou. Žádné mazání
+mezipaměti, žádné přeinstalování.
+
 ## Nastavení čtečky
 
 Při prvním spuštění aplikace se zeptá na:

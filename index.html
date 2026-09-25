@@ -9,6 +9,11 @@
   <meta name="theme-color" content="#1a1a2e">
   <title>DEK WMS – Sklad CS2</title>
 
+  <!-- Nastavení pro instalaci na plochu (PWA) -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
   <!-- jsQR – spolehlivý QR skener pro mobilní prohlížeče -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
@@ -939,7 +944,7 @@
 
     <div class="divider"></div>
     <div style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v2.0 – pilotní provoz CS2</div>
+      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.0 – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
     </div>
   </div>
@@ -1892,6 +1897,18 @@ el('inp-lokace')?.addEventListener('keydown', e => {
 el('inp-lokace')?.addEventListener('input', e => {
   state.currentLokace = e.target.value.trim().toUpperCase();
 });
+
+// ─────────────────────────────────────────────
+//  INSTALACE NA PLOCHU (PWA)
+// ─────────────────────────────────────────────
+// Service worker se registruje jen na skutečném webu (https).
+// Při otevření souboru z disku se přeskočí, aby to nehlásilo chybu.
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js')
+      .catch(function (e) { console.warn('Service worker se nepodařilo zaregistrovat:', e.message); });
+  });
+}
 
 // ─────────────────────────────────────────────
 //  LASEROVÝ SKENER (HID) – Urovo DT66 a podobné
