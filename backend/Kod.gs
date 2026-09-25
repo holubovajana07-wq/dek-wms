@@ -1,12 +1,16 @@
 // ============================================================
 // DEK WMS – Google Apps Script backend
-// Verze: 3.0 | Pilotní provoz CS2
+// Verze: 3.2 | Pilotní provoz CS2
 // ============================================================
 // Pracuje nad listem DATA (databáze PSP).
 // Časy zapisuje do VLASTNÍCH sloupců "WMS příjem" / "WMS výdej",
 // které si sám založí na konci listu. Existující sloupce
 // "Datum svezeno na CS" a "Datum odesláno z CS" needituje –
 // ty patří jiné automatizaci.
+//
+// Přístup: po přihlášení jménem a PINem vydá skript podepsaný klíč
+// platný 12 hodin. Bez něj odpoví jen na ping, seznam uživatelů
+// a samotné přihlášení. Na čtečce se proto nenastavuje nic.
 // ============================================================
 
 const WMS_CONFIG = {
@@ -48,6 +52,62 @@ function getSheetId_() {
 
 function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('WMS_TOKEN') || '';
+}
+
+// ============================================================
+// PŘÍSTUPOVÝ KLÍČ – vydává se po přihlášení
+// ============================================================
+// Klíč je podepsaný text "jméno|do kdy platí". Podpis umí vyrobit
+// jen tenhle skript, takže se nedá zfalšovat ani si v něm přepsat
+// jméno. Nikde se neukládá – platnost se pozná z něj samotného.
+//
+// Díky tomu se na čtečce nic nenastavuje: stačí jméno a PIN.
+// ============================================================
+
+const PLATNOST_KLICE = 12 * 60 * 60 * 1000;   // 12 hodin
+
+function getTajemstvi_() {
+  const props = PropertiesService.getScriptProperties();
+  let t = props.getProperty('WMS_SECRET');
+  if (!t) {
+    t = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('WMS_SECRET', t);
+  }
+  return t;
+}
+
+function podpis_(text) {
+  return Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(text, getTajemstvi_())
+  );
+}
+
+function vytvorKlic_(jmeno) {
+  const zaklad = jmeno + '|' + (Date.now() + PLATNOST_KLICE);
+  return Utilities.base64EncodeWebSafe(zaklad) + '.' + podpis_(zaklad);
+}
+
+// Vrátí jméno přihlášeného, nebo null když klíč neplatí
+function overKlic_(klic) {
+  if (!klic) return null;
+  try {
+    const casti = String(klic).split('.');
+    if (casti.length !== 2) return null;
+
+    const zaklad = Utilities.newBlob(
+      Utilities.base64DecodeWebSafe(casti[0])
+    ).getDataAsString();
+
+    if (podpis_(zaklad) !== casti[1]) return null;   // cizí nebo upravený klíč
+
+    const p = zaklad.split('|');
+    if (p.length !== 2) return null;
+    if (Number(p[1]) < Date.now()) return null;      // vypršel
+
+    return p[0];
+  } catch (e) {
+    return null;
+  }
 }
 
 // Otevření tabulky není zadarmo – u téhle (20 listů, 1,25 MB) trvá skoro
@@ -158,9 +218,25 @@ function doGet(e) {
 
   let result;
   try {
-    const token = getToken_();
-    if (token && action !== 'ping' && params.token !== token) {
-      return odpoved_({ chyba: 'Neplatný token' }, callback);
+    // Bez přihlášení jdou jen tyhle tři věci: ozvat se, vypsat jména
+    // do výběru a samotné přihlášení.
+    const verejne = (action === 'ping' || action === 'prihlaseni' || action === 'uzivatele');
+
+    if (!verejne) {
+      const prihlaseny = overKlic_(params.klic);
+      const token = getToken_();
+      const tokenSedi = token && params.token === token;
+
+      if (!prihlaseny && !tokenSedi) {
+        return odpoved_({
+          chyba: 'Nejste přihlášeni nebo platnost vypršela',
+          prihlasitZnovu: true
+        }, callback);
+      }
+
+      // Jméno bereme z podepsaného klíče, ne z toho, co pošle čtečka –
+      // do tabulky se tak nedá zapsat pohyb pod cizím jménem.
+      if (prihlaseny) params.uzivatel = prihlaseny;
     }
 
     if (action === 'lookup') {
@@ -198,7 +274,7 @@ function doGet(e) {
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '3.1', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '3.2', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };
@@ -722,7 +798,7 @@ function prihlas(jmeno, pin) {
 
     if (String(data[i][1] || '').trim() === pin) {
       cache.remove(klic);
-      return { ok: true, jmeno: radJmeno };
+      return { ok: true, jmeno: radJmeno, klic: vytvorKlic_(radJmeno) };
     }
     break;
   }

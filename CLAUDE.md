@@ -129,14 +129,23 @@ Přihlášení (v3.1):
   listu `UZIVATELE`. PIN se do čtečky **nikdy neposílá**.
 - Jméno se zapisuje do `POHYBY` (sloupec Uživatel). Platnost 12 hodin,
   pak se přihlašuje znovu. Pět chybných PINů = pauza 5 minut.
-- **Přihlášení řeší dohledatelnost, ne ochranu.** URL skriptu je veřejná,
-  takže kdokoliv ji zná může volat backend přímo a obrazovku obejít.
-  Proti tomu chrání jedině sdílený token `WMS_TOKEN` – ten je tou zámkovou
-  částí. Token a přihlášení jsou dvě nezávislé vrstvy.
+
+Přístup (v3.2) – **přihlášení je zároveň ochranou**:
+- Po úspěšném přihlášení vydá skript **podepsaný klíč** (HMAC nad
+  „jméno|platnost", tajemství ve vlastnosti `WMS_SECRET`). Klíč se nikde
+  neukládá, platnost i jméno se čtou přímo z něj a nejdou zfalšovat.
+- Čtečka ho posílá s každým dalším požadavkem. **Bez klíče backend neodpoví** –
+  veřejné jsou jen `ping`, `uzivatele` (seznam jmen) a `prihlaseni`.
+- Jméno do `POHYBY` se bere **z klíče**, ne z parametru → nejde zapsat pohyb
+  pod cizím jménem.
+- `WMS_TOKEN` zůstává jako druhá, nepovinná cesta (hodí se na testy z prohlížeče).
+
+Adresa skriptu je v `konfigurace.js` (`WMS_URL`), takže **na čtečce se nenastavuje
+nic** – stačí jméno a PIN. Cena za to: adresa je ve veřejném repozitáři. Sama
+o sobě je ale k ničemu, protože bez platného přihlášení skript neodpoví.
+Proto **PINy aspoň pětimístné** – jsou jedinou zábranou.
 
 Zbývá:
-- **Zapnout token** `WMS_TOKEN` (funkce `nastavToken`) a zadat stejnou hodnotu
-  do nastavení každé čtečky. Bez toho je backend otevřený komukoli s URL.
 - **Sken čárového kódu PSP při příjmu** – backend `lookupPsp()` hotový, UI ne
 - **„Co ještě mělo dnes přijet z této pobočky"** – seznam dalších strojů se
   stejným kódem nakládky a datem svozu. Není ani v backendu.

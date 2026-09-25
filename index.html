@@ -14,6 +14,9 @@
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
 
+  <!-- Společné nastavení (adresa skriptu) – načíst PŘED hlavním kódem -->
+  <script src="konfigurace.js"></script>
+
   <!-- jsQR – spolehlivý QR skener pro mobilní prohlížeče -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
@@ -1002,13 +1005,20 @@
   <div id="screen-settings" class="screen">
     <div class="section-title">Připojení</div>
 
-    <div class="form-group">
-      <div class="form-label">Apps Script URL</div>
-      <input class="form-input" id="set-script-url" type="url" autocomplete="off" spellcheck="false">
+    <div id="blok-pripojeni">
+      <div class="form-group">
+        <div class="form-label">Apps Script URL</div>
+        <input class="form-input" id="set-script-url" type="url" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Přístupový token</div>
+        <input class="form-input" id="set-token" type="text" placeholder="nechte prázdné, pokud není nastaven" autocomplete="off" spellcheck="false">
+      </div>
     </div>
-    <div class="form-group">
-      <div class="form-label">Přístupový token</div>
-      <input class="form-input" id="set-token" type="text" placeholder="nechte prázdné, pokud není nastaven" autocomplete="off" spellcheck="false">
+
+    <div class="form-note" id="info-pripojeni" style="display:none;">
+      ✅ Připojení je nastavené centrálně – na čtečce se nic nezadává.
+      Přístup se řídí přihlášením jménem a PINem.
     </div>
     <div class="form-group">
       <div class="form-label">Sklad / Pobočka</div>
@@ -1034,7 +1044,7 @@
 
     <div class="divider"></div>
     <div style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.1 – pilotní provoz CS2</div>
+      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.2 – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
     </div>
   </div>
@@ -1050,8 +1060,10 @@
 //  STATE
 // ─────────────────────────────────────────────
 const state = {
+  // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
+  // se nenastavuje nic a políčko s URL se v nastavení ani neukazuje.
   config: {
-    scriptUrl: '',
+    scriptUrl: (typeof WMS_URL === 'string' && WMS_URL) ? WMS_URL : '',
     token: '',            // sdílené heslo, musí souhlasit s WMS_TOKEN ve skriptu
     location: 'CS2',
     demoMode: false,
@@ -1063,6 +1075,7 @@ const state = {
   currentNonce: null,        // otisk aktuálního skenu (proti dvojímu zápisu)
   prepsatPotvrzeno: null,    // uživatel potvrdil přepis už zapsaného času
   uzivatel: null,            // přihlášený skladník (jméno)
+  klic: null,                // přístupový klíč vydaný při přihlášení
   pin: '',                   // rozepsaný PIN na přihlašovací obrazovce
   vydejData: null,           // seznam poboček načtený ze serveru
   vydejPobocka: null,        // právě otevřená pobočka
@@ -1079,28 +1092,27 @@ window.addEventListener('DOMContentLoaded', () => {
   loadConfig();
   loadHistory();
 
-  const saved = lsGet('dek_wms_config');
-  if (saved) {
-    try {
-      const cfg = JSON.parse(saved);
-      // Přeskoč úvodní nastavení jen tehdy, když je opravdu kam zapisovat.
-      // Dřív stačilo mít uložené ID tabulky – aplikace pak naběhla bez URL
-      // skriptu a tiše jela na DEMO datech.
-      if (cfg.scriptUrl || cfg.demoMode) {
-        Object.assign(state.config, cfg);
-        showMainApp();
-        return;
-      }
-    } catch(e) {}
+  // Úvodní nastavení přeskoč, když je kam zapisovat – ať už adresa přišla
+  // z konfigurace.js, nebo si ji čtečka pamatuje z minula.
+  if (state.config.scriptUrl || state.config.demoMode) {
+    showMainApp();
+    return;
   }
-  // Show setup
+  // Jinak zůstane vidět úvodní obrazovka s nastavením
 });
+
+function jeUrlZKodu() {
+  return typeof WMS_URL === 'string' && WMS_URL.length > 0;
+}
 
 function loadConfig() {
   const saved = lsGet('dek_wms_config');
   if (saved) {
     try { Object.assign(state.config, JSON.parse(saved)); } catch(e) {}
   }
+  // Adresa z konfigurace.js vždy přebije to, co má čtečka uložené z minula.
+  // Jinak by po změně adresy zůstaly čtečky viset na té staré.
+  if (jeUrlZKodu()) state.config.scriptUrl = WMS_URL;
   // Populate settings fields
   setTimeout(() => {
     el('set-script-url').value = state.config.scriptUrl || '';
@@ -1162,6 +1174,7 @@ function showMainApp() {
   const u = nactiPrihlaseni();
   if (u) {
     state.uzivatel = u.jmeno;
+    state.klic     = u.klic || null;
     spustAplikaci();
     return;
   }
@@ -1200,6 +1213,20 @@ function nactiPrihlaseni() {
     if (Date.now() - u.cas > PRIHLASENI_PLATNOST) return null;   // směna skončila
     return u;
   } catch (e) { return null; }
+}
+
+// Klíč vypršel nebo neplatí – zpátky na přihlašovací obrazovku
+function vyprselePrihlaseni() {
+  state.uzivatel = null;
+  state.klic = null;
+  lsDel('dek_wms_uzivatel');
+  el('main-header').style.display = 'none';
+  el('main-nav').style.display = 'none';
+  stopScanner();
+  zobrazPrihlaseni();
+  setTimeout(function () {
+    zobrazChybuLoginu('Platnost přihlášení vypršela. Přihlaste se prosím znovu.');
+  }, 400);
 }
 
 async function zobrazPrihlaseni() {
@@ -1279,13 +1306,19 @@ async function prihlasit() {
   }
 
   state.uzivatel = odpoved.jmeno;
-  lsSet('dek_wms_uzivatel', JSON.stringify({ jmeno: odpoved.jmeno, cas: Date.now() }));
+  state.klic     = odpoved.klic || null;
+  lsSet('dek_wms_uzivatel', JSON.stringify({
+    jmeno: odpoved.jmeno,
+    klic:  state.klic,
+    cas:   Date.now(),
+  }));
   lsSet('dek_wms_posledni_uzivatel', odpoved.jmeno);
   spustAplikaci();
 }
 
 function odhlasit() {
   state.uzivatel = null;
+  state.klic = null;
   lsDel('dek_wms_uzivatel');
   el('main-header').style.display = 'none';
   el('main-nav').style.display = 'none';
@@ -1343,6 +1376,10 @@ function showTab(name) {
   else stopScanner();
 
   if (name === 'settings') {
+    // Když adresa přišla z konfigurace.js, políčka na ni se neukazují –
+    // jinak by vznikl dojem, že se dá na čtečce přenastavit.
+    el('blok-pripojeni').style.display = jeUrlZKodu() ? 'none' : 'block';
+    el('info-pripojeni').style.display = jeUrlZKodu() ? 'block' : 'none';
     el('set-script-url').value = state.config.scriptUrl || '';
     el('set-token').value = state.config.token || '';
     el('set-location').value = state.config.location || 'CS2';
@@ -1607,10 +1644,13 @@ function jsonp(params, timeoutMs) {
 
     window[callbackName] = function(data) {
       cleanup();
+      // Skript hlásí, že klíč vypršel nebo neplatí – vrať se na přihlášení
+      if (data && data.prihlasitZnovu) vyprselePrihlaseni();
       resolve(data || { chyba: 'Prázdná odpověď ze skriptu' });
     };
 
     const vse = Object.assign({}, params, { callback: callbackName, _: Date.now() });
+    if (state.klic) vse.klic = state.klic;              // klíč z přihlášení
     if (state.config.token) vse.token = state.config.token;
 
     const qs = Object.keys(vse)
@@ -2045,8 +2085,10 @@ function clearHistory() {
 //  SETTINGS SAVE
 // ─────────────────────────────────────────────
 async function saveSettings() {
-  state.config.scriptUrl = el('set-script-url').value.trim();
-  state.config.token     = el('set-token').value.trim();
+  if (!jeUrlZKodu()) {
+    state.config.scriptUrl = el('set-script-url').value.trim();
+    state.config.token     = el('set-token').value.trim();
+  }
   state.config.location  = el('set-location').value.trim() || 'CS2';
   state.config.demoMode  = false;
   saveConfig();
