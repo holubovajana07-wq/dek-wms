@@ -61,7 +61,8 @@ Je to běžící automatizace, do které WMS vstupuje jako další účastník.
 | `EMAIL_FRONTA`, `EMAIL_NASTAVENI` | Rozesílání mailů |
 | `AGENDA_IMPORT`, `AGENDA_LOG` | Import z Agendy |
 | `POBOCKY`, `PUJ`, `PP`, `OBJEMNE_POLOZKY` | Číselníky |
-| `POHYBY` | Auditní log WMS |
+| `POHYBY` | Auditní log WMS – včetně sloupce **Uživatel** |
+| `UZIVATELE` | Skladníci pro přihlášení: `Jméno \| PIN \| Aktivní` |
 
 > ⚠️ `LOGISTIK-výdej` vypadá jako hotový seznam „PSP čeká na odeslání", ale
 > **je to snímek, který se obnoví až ručním kliknutím na „aktualizuj listy".**
@@ -123,7 +124,19 @@ Hotovo ve frontendu:
 - `localStorage` ošetřený – aplikace naběhne i tam, kde je ukládání zakázané
 - ověřeno příjmem `4CK1` z PSP-860-26-00082: čas dostal jen on, `92CN` zůstalo prázdné
 
+Přihlášení (v3.1):
+- Skladník se vybere ze seznamu a zadá PIN; ověřuje se na serveru proti
+  listu `UZIVATELE`. PIN se do čtečky **nikdy neposílá**.
+- Jméno se zapisuje do `POHYBY` (sloupec Uživatel). Platnost 12 hodin,
+  pak se přihlašuje znovu. Pět chybných PINů = pauza 5 minut.
+- **Přihlášení řeší dohledatelnost, ne ochranu.** URL skriptu je veřejná,
+  takže kdokoliv ji zná může volat backend přímo a obrazovku obejít.
+  Proti tomu chrání jedině sdílený token `WMS_TOKEN` – ten je tou zámkovou
+  částí. Token a přihlášení jsou dvě nezávislé vrstvy.
+
 Zbývá:
+- **Zapnout token** `WMS_TOKEN` (funkce `nastavToken`) a zadat stejnou hodnotu
+  do nastavení každé čtečky. Bez toho je backend otevřený komukoli s URL.
 - **Sken čárového kódu PSP při příjmu** – backend `lookupPsp()` hotový, UI ne
 - **„Co ještě mělo dnes přijet z této pobočky"** – seznam dalších strojů se
   stejným kódem nakládky a datem svozu. Není ani v backendu.

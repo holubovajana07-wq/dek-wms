@@ -497,6 +497,58 @@
     }
     .success-flash.show { opacity: 1; }
 
+    /* ── PŘIHLÁŠENÍ ── */
+    .pin-zobrazeni {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      padding: 8px 0 4px;
+    }
+    .pin-tecka {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid var(--grey);
+    }
+    .pin-tecka.plna { background: var(--red); border-color: var(--red); }
+
+    .klavesnice {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .klavesa {
+      background: var(--navy-mid);
+      border: 1.5px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius);
+      min-height: 62px;
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--white);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .klavesa:active { background: var(--navy-card); transform: scale(0.96); }
+    .klavesa.akce { font-size: 20px; color: var(--text-dim); }
+
+    .badge-uzivatel {
+      background: var(--navy-card);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+
     /* ── VÝDEJ – seznam poboček a PSP ── */
     .vydej-radek {
       background: var(--navy-mid);
@@ -733,6 +785,47 @@
     </button>
   </div>
 
+  <!-- PŘIHLÁŠENÍ -->
+  <div id="screen-login" class="screen">
+    <div class="config-banner">
+      <div style="font-size:44px;margin-bottom:10px;">👤</div>
+      <h2>Přihlášení</h2>
+      <p>Vyberte se ze seznamu a zadejte svůj PIN.</p>
+    </div>
+
+    <div class="form-group">
+      <div class="form-label">Skladník</div>
+      <select class="form-select" id="inp-uzivatel">
+        <option value="">Načítám…</option>
+      </select>
+    </div>
+
+    <div class="form-label" style="text-align:center;">PIN</div>
+    <div class="pin-zobrazeni" id="pin-zobrazeni"></div>
+
+    <div class="varovani chyba" id="login-chyba" style="display:none;">
+      <span class="varovani-ikona">⛔</span>
+      <span id="login-chyba-text"></span>
+    </div>
+
+    <div class="klavesnice">
+      <div class="klavesa" onclick="pinCislice('1')">1</div>
+      <div class="klavesa" onclick="pinCislice('2')">2</div>
+      <div class="klavesa" onclick="pinCislice('3')">3</div>
+      <div class="klavesa" onclick="pinCislice('4')">4</div>
+      <div class="klavesa" onclick="pinCislice('5')">5</div>
+      <div class="klavesa" onclick="pinCislice('6')">6</div>
+      <div class="klavesa" onclick="pinCislice('7')">7</div>
+      <div class="klavesa" onclick="pinCislice('8')">8</div>
+      <div class="klavesa" onclick="pinCislice('9')">9</div>
+      <div class="klavesa akce" onclick="pinSmaz()">⌫</div>
+      <div class="klavesa" onclick="pinCislice('0')">0</div>
+      <div class="klavesa akce" onclick="prihlasit()" id="klavesa-ok">OK</div>
+    </div>
+
+    <button class="btn btn-ghost" onclick="showTab('settings')">Nastavení připojení</button>
+  </div>
+
   <!-- HEADER (shown after setup) -->
   <div class="header" id="main-header" style="display:none;">
     <div>
@@ -745,6 +838,7 @@
     </div>
     <div class="header-right">
       <div class="badge-location" id="badge-loc">CS2</div>
+      <div class="badge-uzivatel" id="badge-uzivatel" style="display:none;"></div>
     </div>
   </div>
 
@@ -933,8 +1027,14 @@
     <button class="btn btn-secondary" onclick="saveLokace()">Uložit lokace</button>
 
     <div class="divider"></div>
+
+    <div class="section-title">Přihlášený skladník</div>
+    <div class="form-note" id="info-uzivatel">Nikdo není přihlášen.</div>
+    <button class="btn btn-secondary" onclick="odhlasit()">Odhlásit se</button>
+
+    <div class="divider"></div>
     <div style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.0 – pilotní provoz CS2</div>
+      <div style="font-size:12px;color:var(--text-dim);">DEK WMS v3.1 – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
     </div>
   </div>
@@ -962,6 +1062,8 @@ const state = {
   currentLokace: null,
   currentNonce: null,        // otisk aktuálního skenu (proti dvojímu zápisu)
   prepsatPotvrzeno: null,    // uživatel potvrdil přepis už zapsaného času
+  uzivatel: null,            // přihlášený skladník (jméno)
+  pin: '',                   // rozepsaný PIN na přihlašovací obrazovce
   vydejData: null,           // seznam poboček načtený ze serveru
   vydejPobocka: null,        // právě otevřená pobočka
   vydejVybrane: {},          // zaškrtnutá PSP k výdeji
@@ -1054,15 +1156,155 @@ function saveConfig() {
 
 function showMainApp() {
   el('screen-setup').classList.remove('active');
+
+  // Platné přihlášení z minula (do 12 hodin) se nepožaduje znovu –
+  // skladník nemá po každém zamknutí displeje ťukat PIN.
+  const u = nactiPrihlaseni();
+  if (u) {
+    state.uzivatel = u.jmeno;
+    spustAplikaci();
+    return;
+  }
+
+  el('main-header').style.display = 'none';
+  el('main-nav').style.display = 'none';
+  zobrazPrihlaseni();
+}
+
+function spustAplikaci() {
+  el('screen-setup').classList.remove('active');
+  el('screen-login').classList.remove('active');
   el('main-header').style.display = 'flex';
   el('main-nav').style.display = 'flex';
   el('badge-loc').textContent = state.config.location;
+  zobrazUzivatele();
   jdiNaPrijem();
 }
 
 // ─────────────────────────────────────────────
 //  TABS
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  PŘIHLÁŠENÍ
+// ─────────────────────────────────────────────
+// Slouží k dohledatelnosti – ke každému pohybu se zapíše jméno.
+// PIN se ověřuje na serveru, do čtečky se nikdy neposílá.
+// Proti cizím lidem chrání token, ne tahle obrazovka.
+
+const PRIHLASENI_PLATNOST = 12 * 60 * 60 * 1000;   // 12 hodin
+
+function nactiPrihlaseni() {
+  try {
+    const u = JSON.parse(lsGet('dek_wms_uzivatel') || 'null');
+    if (!u || !u.jmeno || !u.cas) return null;
+    if (Date.now() - u.cas > PRIHLASENI_PLATNOST) return null;   // směna skončila
+    return u;
+  } catch (e) { return null; }
+}
+
+async function zobrazPrihlaseni() {
+  state.pin = '';
+  vykresliPin();
+  el('login-chyba').style.display = 'none';
+  showTab('login');
+
+  const sel = el('inp-uzivatel');
+  sel.innerHTML = '<option value="">Načítám…</option>';
+
+  const data = (state.config.demoMode || !state.config.scriptUrl)
+    ? { ok: true, uzivatele: ['DEMO skladník'] }
+    : await jsonp({ action: 'uzivatele' }, 20000);
+
+  if (!data || !data.uzivatele || !data.uzivatele.length) {
+    sel.innerHTML = '<option value="">— nikdo není zadán —</option>';
+    zobrazChybuLoginu((data && data.chyba)
+      || 'V tabulce nejsou žádní uživatelé. Doplňte je do listu UZIVATELE.');
+    return;
+  }
+
+  sel.innerHTML = '<option value="">— vyberte —</option>'
+    + data.uzivatele.map(j => `<option value="${j}">${j}</option>`).join('');
+
+  // Předvyplň toho, kdo se hlásil naposledy z téhle čtečky
+  const posledni = lsGet('dek_wms_posledni_uzivatel');
+  if (posledni && data.uzivatele.indexOf(posledni) >= 0) sel.value = posledni;
+}
+
+function vykresliPin() {
+  const delka = (state.pin || '').length;
+  let html = '';
+  for (let i = 0; i < Math.max(4, delka); i++) {
+    html += '<div class="pin-tecka' + (i < delka ? ' plna' : '') + '"></div>';
+  }
+  el('pin-zobrazeni').innerHTML = html;
+}
+
+function pinCislice(c) {
+  if ((state.pin || '').length >= 8) return;
+  state.pin = (state.pin || '') + c;
+  el('login-chyba').style.display = 'none';
+  vykresliPin();
+  if (state.pin.length === 4) prihlasit();    // běžný PIN je čtyřmístný
+}
+
+function pinSmaz() {
+  state.pin = (state.pin || '').slice(0, -1);
+  vykresliPin();
+}
+
+function zobrazChybuLoginu(text) {
+  el('login-chyba-text').textContent = text;
+  el('login-chyba').style.display = 'flex';
+}
+
+async function prihlasit() {
+  const jmeno = el('inp-uzivatel').value;
+  if (!jmeno) { zobrazChybuLoginu('Nejdřív vyberte své jméno'); return; }
+  if (!state.pin) { zobrazChybuLoginu('Zadejte PIN'); return; }
+
+  const btn = el('klavesa-ok');
+  btn.textContent = '…';
+
+  const odpoved = (state.config.demoMode || !state.config.scriptUrl)
+    ? { ok: true, jmeno: jmeno }
+    : await jsonp({ action: 'prihlaseni', jmeno: jmeno, pin: state.pin }, 20000);
+
+  btn.textContent = 'OK';
+  state.pin = '';
+  vykresliPin();
+
+  if (!odpoved || !odpoved.ok) {
+    zobrazChybuLoginu((odpoved && (odpoved.chyba || odpoved.zprava)) || 'Přihlášení se nezdařilo');
+    return;
+  }
+
+  state.uzivatel = odpoved.jmeno;
+  lsSet('dek_wms_uzivatel', JSON.stringify({ jmeno: odpoved.jmeno, cas: Date.now() }));
+  lsSet('dek_wms_posledni_uzivatel', odpoved.jmeno);
+  spustAplikaci();
+}
+
+function odhlasit() {
+  state.uzivatel = null;
+  lsDel('dek_wms_uzivatel');
+  el('main-header').style.display = 'none';
+  el('main-nav').style.display = 'none';
+  stopScanner();
+  zobrazPrihlaseni();
+}
+
+function zobrazUzivatele() {
+  const b = el('badge-uzivatel');
+  if (state.uzivatel) {
+    b.textContent = state.uzivatel;
+    b.style.display = 'block';
+    el('info-uzivatel').textContent = 'Přihlášen: ' + state.uzivatel;
+  } else {
+    b.style.display = 'none';
+    el('info-uzivatel').textContent = 'Nikdo není přihlášen.';
+  }
+}
+
 // Která záložka v dolní liště patří ke které obrazovce
 const TAB_PRO_OBRAZOVKU = {
   scan:        'prijem',
@@ -1086,7 +1328,7 @@ function jdiNaVydej() {
 }
 
 function showTab(name) {
-  ['scan','history','settings','confirm','vydej','vydej-psp'].forEach(s => {
+  ['scan','history','settings','confirm','vydej','vydej-psp','login'].forEach(s => {
     el('screen-' + s).classList.remove('active');
   });
   ['prijem','vydej','history','settings'].forEach(t => {
@@ -1495,6 +1737,7 @@ async function confirmMove() {
     pobVykladka: info.pobVykladka || '',
     lokace:      isPrijem ? lokace : '—',
     sklad:       state.config.location,
+    uzivatel:    state.uzivatel || '',
     cas:         new Date().toISOString(),
     nonce:       state.currentNonce,
     prepsat:     state.prepsatPotvrzeno === state.currentNonce,
@@ -1566,6 +1809,7 @@ async function saveRecord(record) {
     pobVykladka: record.pobVykladka,
     lokace:      record.lokace,
     sklad:       record.sklad,
+    uzivatel:    record.uzivatel,
     cas:         record.cas,
     nonce:       record.nonce,
     prepsat:     record.prepsat ? '1' : '',
@@ -1689,6 +1933,7 @@ async function potvrditVydej() {
       pobVykladka: p.nazev,
       lokace:      '—',
       sklad:       state.config.location,
+      uzivatel:    state.uzivatel || '',
       cas:         new Date().toISOString(),
       nonce:       'vydej-' + cisloPsp + '-' + Date.now(),
     };
@@ -1816,6 +2061,9 @@ async function saveSettings() {
   } else {
     showToast('⚠️ Uloženo, ale skript neodpovídá: ' + (test.chyba || 'bez odpovědi'), 'error');
   }
+
+  // Když se sem uživatel dostal z přihlašovací obrazovky, vrať ho zpět
+  if (!state.uzivatel) zobrazPrihlaseni();
 }
 
 function saveLokace() {
