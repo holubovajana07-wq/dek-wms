@@ -1717,7 +1717,24 @@ function goBack() {
 // takže z prohlížeče spolehlivě funguje jen JSONP přes GET.
 // Každý požadavek nese parametr "_" s časem, aby ho prohlížeč
 // nevytáhl z cache místo skutečného volání.
-function jsonp(params, timeoutMs) {
+// Apps Script občas požadavek prostě zahodí – vrátí chybu spojení,
+// i když je všechno v pořádku. Je to jeho vlastnost, ne naše chyba.
+// Proto to zkusíme třikrát, než obtěžujeme skladníka.
+// Opakování je bezpečné: čtení nic nemění a u zápisu má skript otisk
+// (nonce), takže stejný požadavek podruhé nezapíše.
+async function jsonp(params, timeoutMs) {
+  for (let pokus = 1; pokus <= 3; pokus++) {
+    const odpoved = await jsonpJednou_(params, timeoutMs);
+    if (!odpoved || !odpoved.spojeniSelhalo) return odpoved;
+    if (pokus < 3) {
+      console.warn('[WMS] ' + (params.action || '?') + ' – spojení selhalo, pokus ' + (pokus + 1));
+      await new Promise(r => setTimeout(r, 400 * pokus));
+    }
+  }
+  return { chyba: 'Nepodařilo se spojit se skriptem ani na tři pokusy' };
+}
+
+function jsonpJednou_(params, timeoutMs) {
   return new Promise((resolve) => {
     if (!state.config.scriptUrl) {
       resolve({ chyba: 'Není nastavena URL skriptu' });
@@ -1769,7 +1786,8 @@ function jsonp(params, timeoutMs) {
     script.src = state.config.scriptUrl + '?' + qs;
     script.onerror = () => {
       cleanup();
-      resolve({ chyba: 'Nepodařilo se spojit se skriptem' });
+      // Označíme to, aby to nadřazená funkce mohla zkusit znovu
+      resolve({ chyba: 'Nepodařilo se spojit se skriptem', spojeniSelhalo: true });
     };
     document.head.appendChild(script);
   });
