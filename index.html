@@ -537,6 +537,13 @@
     }
     .klavesa:active { background: var(--navy-card); transform: scale(0.96); }
     .klavesa.akce { font-size: 20px; color: var(--text-dim); }
+    /* OK musí být vidět – PIN se nepotvrzuje sám, může mít různou délku */
+    .klavesa.potvrdit {
+      background: var(--green);
+      border-color: var(--green);
+      font-size: 20px;
+    }
+    .klavesa.potvrdit:active { background: var(--green-dark); }
 
     .badge-uzivatel {
       background: var(--navy-card);
@@ -823,7 +830,7 @@
       <div class="klavesa" onclick="pinCislice('9')">9</div>
       <div class="klavesa akce" onclick="pinSmaz()">⌫</div>
       <div class="klavesa" onclick="pinCislice('0')">0</div>
-      <div class="klavesa akce" onclick="prihlasit()" id="klavesa-ok">OK</div>
+      <div class="klavesa potvrdit" onclick="prihlasit()" id="klavesa-ok">OK</div>
     </div>
 
     <button class="btn btn-ghost" onclick="showTab('settings')">Nastavení připojení</button>
@@ -1271,7 +1278,8 @@ function pinCislice(c) {
   state.pin = (state.pin || '') + c;
   el('login-chyba').style.display = 'none';
   vykresliPin();
-  if (state.pin.length === 4) prihlasit();    // běžný PIN je čtyřmístný
+  // Schválně se nepřihlašuje samo po čtvrté číslici – PIN může být delší.
+  // Potvrzuje se tlačítkem OK nebo Enterem.
 }
 
 function pinSmaz() {
@@ -2206,6 +2214,15 @@ let hidBuffer = '';
 let hidTimer  = null;
 
 document.addEventListener('keydown', e => {
+  // Na přihlašovací obrazovce obsluhuje klávesnice PIN – ať jde zadat
+  // i z klávesnice počítače, nejen ťukáním do dlaždic.
+  if (el('screen-login').classList.contains('active')) {
+    if (e.key >= '0' && e.key <= '9') { pinCislice(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace')   { pinSmaz();         e.preventDefault(); }
+    else if (e.key === 'Enter')       { prihlasit();       e.preventDefault(); }
+    return;
+  }
+
   // Když uživatel píše do pole, nech ho psát
   const tag = (document.activeElement && document.activeElement.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
