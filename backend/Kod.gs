@@ -10,8 +10,9 @@
 // ============================================================
 
 const WMS_CONFIG = {
-  dataList:   'DATA',
-  pohybyList: 'POHYBY',
+  dataList:      'DATA',
+  pohybyList:    'POHYBY',
+  uzivateleList: 'UZIVATELE',
 
   // Názvy sloupců, které si WMS založí (hledají se podle názvu,
   // takže je jedno, na které pozici skončí)

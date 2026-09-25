@@ -751,21 +751,7 @@
   <!-- SCAN SCREEN -->
   <div id="screen-scan" class="screen">
 
-    <div class="section-title">Akce</div>
-    <div class="action-grid">
-      <div class="action-card" id="card-prijem" onclick="selectAction('prijem')">
-        <div class="action-icon">📥</div>
-        <div class="action-label">Příjem</div>
-        <div class="action-desc">Stroj dorazil na CS2</div>
-      </div>
-      <div class="action-card" id="card-vydej" onclick="selectAction('vydej')">
-        <div class="action-icon">📤</div>
-        <div class="action-label">Výdej</div>
-        <div class="action-desc">Vybrat pobočku a PSP</div>
-      </div>
-    </div>
-
-    <div class="section-title">Skenovat stroj</div>
+    <div class="section-title">📥 Příjem – naskenovat stroj</div>
 
     <div class="scanner-container" id="scanner-box">
       <video id="preview" playsinline muted autoplay></video>
@@ -864,7 +850,7 @@
     </div>
     <div class="scanner-hint" id="vydej-info">Načítám…</div>
     <div class="history-list" id="vydej-pobocky"></div>
-    <button class="btn btn-ghost" onclick="showTab('scan')">← Zpět na skenování</button>
+    <button class="btn btn-ghost" onclick="jdiNaPrijem()">← Zpět na příjem</button>
   </div>
 
   <!-- VÝDEJ – KROK 2: PSP VYBRANÉ POBOČKY -->
@@ -900,9 +886,13 @@
 
   <!-- NAV TABS -->
   <div class="nav-tabs" id="main-nav" style="display:none;">
-    <button class="nav-tab active" id="tab-scan" onclick="showTab('scan')">
-      <span class="nav-tab-icon">📷</span>
-      <span class="nav-tab-label">Skenovat</span>
+    <button class="nav-tab active" id="tab-prijem" onclick="jdiNaPrijem()">
+      <span class="nav-tab-icon">📥</span>
+      <span class="nav-tab-label">Příjem</span>
+    </button>
+    <button class="nav-tab" id="tab-vydej" onclick="jdiNaVydej()">
+      <span class="nav-tab-icon">📤</span>
+      <span class="nav-tab-label">Výdej</span>
     </button>
     <button class="nav-tab" id="tab-history" onclick="showTab('history')">
       <span class="nav-tab-icon">📋</span>
@@ -1067,22 +1057,45 @@ function showMainApp() {
   el('main-header').style.display = 'flex';
   el('main-nav').style.display = 'flex';
   el('badge-loc').textContent = state.config.location;
-  showTab('scan');
-  startScanner();
+  jdiNaPrijem();
 }
 
 // ─────────────────────────────────────────────
 //  TABS
 // ─────────────────────────────────────────────
+// Která záložka v dolní liště patří ke které obrazovce
+const TAB_PRO_OBRAZOVKU = {
+  scan:        'prijem',
+  confirm:     'prijem',
+  vydej:       'vydej',
+  'vydej-psp': 'vydej',
+  history:     'history',
+  settings:    'settings',
+};
+
+function jdiNaPrijem() {
+  state.currentAction = 'prijem';
+  el('scan-hint').textContent = 'Naskenujte QR kód přijímaného stroje';
+  showTab('scan');
+}
+
+function jdiNaVydej() {
+  state.currentAction = 'vydej';
+  showTab('vydej');
+  nactiSeznamVydeje();
+}
+
 function showTab(name) {
   ['scan','history','settings','confirm','vydej','vydej-psp'].forEach(s => {
     el('screen-' + s).classList.remove('active');
   });
-  ['scan','history','settings'].forEach(t => {
+  ['prijem','vydej','history','settings'].forEach(t => {
     el('tab-' + t)?.classList.remove('active');
   });
   el('screen-' + name).classList.add('active');
-  if (el('tab-' + name)) el('tab-' + name).classList.add('active');
+
+  const tab = TAB_PRO_OBRAZOVKU[name];
+  if (tab && el('tab-' + tab)) el('tab-' + tab).classList.add('active');
 
   if (name === 'scan') startScanner();
   else stopScanner();
@@ -1095,24 +1108,6 @@ function showTab(name) {
   }
 }
 
-// ─────────────────────────────────────────────
-//  ACTION SELECTION
-// ─────────────────────────────────────────────
-function selectAction(action) {
-  state.currentAction = action;
-  ['prijem','vydej'].forEach(a => {
-    el('card-' + a).classList.toggle('selected', a === action);
-  });
-
-  // Výdej se neskenuje – jde se přes seznam poboček a zaškrtání PSP
-  if (action === 'vydej') {
-    showTab('vydej');
-    nactiSeznamVydeje();
-    return;
-  }
-
-  el('scan-hint').textContent = 'Naskenujte QR kód přijímaného stroje';
-}
 
 // ─────────────────────────────────────────────
 //  SCANNER – jsQR + canvas loop
