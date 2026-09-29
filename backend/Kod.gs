@@ -370,12 +370,19 @@ const OKNA_RADKU = [400, 2000];
 // takže 2 500 je zhruba tříměsíční rezerva.
 const OKNO_VYDEJ = 2500;
 
-// Kolik posledních řádků se prochází při ZÁPISU času. Dřív se četla celá
-// tabulka (~37 000 buněk) při každém uložení, přestože hledaný stroj leží
-// skoro vždycky na konci. Když se v okně nic nenajde – nebo když nález sahá
-// až na jeho horní okraj a mohl by pokračovat výš – projde se tabulka celá,
-// takže se zápis nemůže minout s řádkem.
-const OKNO_ZAPISU = 2500;
+// Okna pro ZÁPIS času. Dřív se četla celá tabulka (~37 000 buněk) při každém
+// uložení, přestože hledané PSP leží skoro vždycky na konci.
+//
+// Měřeno funkcí porovnejOknoZapisu() na ostrých datech (29. 9. 2026):
+//   celá tabulka  3 843 ms na jedno PSP
+//   2 500 řádků   1 387 ms
+// Rozhoduje délka úseku, ne počet buněk – proto se jde po stupních
+// a drtivá většina zápisů skončí hned v prvním.
+//
+// Bezpečnost: když se v okně nic nenajde – nebo když nález sahá až na jeho
+// horní okraj a PSP může pokračovat výš – jde se na širší okno a nakonec
+// na celou tabulku. Zápis se tedy nemůže minout s řádkem.
+const OKNA_ZAPISU = [400, 2500];
 
 // Načte DVA bloky sloupců pro rozsah řádků odRadku..odRadku+pocet-1.
 // Dva souvislé bloky jsou rychlejší než čtyři užší – režie dotazu
@@ -713,6 +720,10 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
 
 const POLE_INDEXU = ['id', 'nazev', 'psp', 'kodZ', 'pobZ', 'kodDo', 'pobDo', 'datumSvozu', 'radek'];
 
+// Příslušenství nemá ID stroje, takže se neskenuje – stačí u něj vědět,
+// ke kterému dokladu patří a jak se jmenuje.
+const POLE_PRISLUSENSTVI = ['psp', 'nazev'];
+
 function getIndexPrijem(cerstve) {
   const cache = CacheService.getScriptCache();
   if (!cerstve) {
@@ -745,17 +756,30 @@ function getIndexPrijem(cerstve) {
   const b = function (r, s) { return r[s - B_OD]; };
 
   const stroje = [];
+  const prislusenstvi = [];
+
   for (let i = 0; i < n; i++) {
     const rA = blokA[i], rB = blokB[i];
     if (b(rB, c.storno)) continue;
-    // Do indexu patří jen stroje, které opravdu ještě nedorazily –
+    // Do indexu patří jen položky, které opravdu ještě nedorazily –
     // tedy ani čas od WMS, ani datum v R, ani zaškrtnuté T.
     if (b(rB, wms.prijem)) continue;
     if (a(rA, c.svezenoNaCS)) continue;
     if (a(rA, c.svezeno)) continue;
 
     const id = String(a(rA, c.idStroje) || '').trim();
-    if (!id) continue;                        // příslušenství bez ID
+
+    // Příslušenství (bez ID stroje) se neskenuje, takže do seznamu strojů
+    // nepatří. Do výpisu dokladu ale ano – jinak by skladník po naskenování
+    // papíru neviděl hadice a kabely, které k stroji patří. Posílá se
+    // úsporně, jen PSP + název, aby index zbytečně nenabobtnal.
+    if (!id) {
+      prislusenstvi.push([
+        String(a(rA, c.cisloPsp)     || ''),
+        String(a(rA, c.nazevPolozky) || ''),
+      ]);
+      continue;
+    }
 
     stroje.push([
       id,
@@ -776,6 +800,8 @@ function getIndexPrijem(cerstve) {
     pocet:  stroje.length,
     cas:    new Date().toISOString(),
     stroje: stroje,
+    poleP:  POLE_PRISLUSENSTVI,
+    prislusenstvi: prislusenstvi,
   };
 
   try {
@@ -974,6 +1000,30 @@ function hledejRadkyKZapisu_(sheet, odRadku, pocet, sloupec, hledanePsp, hledany
   return { cileRadky: cileRadky, existujiciCas: existujiciCas, uOkraje: uOkraje };
 }
 
+// Hledá po stupních od konce tabulky (OKNA_ZAPISU) a nakonec v celé.
+// Používá to jak ostrý zápis, tak kontrola porovnejOknoZapisu() – ať se
+// neověřuje něco jiného, než co se doopravdy zapisuje.
+function najdiKZapisu_(sheet, posledni, sloupec, hledanePsp, hledanyId) {
+  const meze = OKNA_ZAPISU.concat([posledni - 1]);
+  let nalez = { cileRadky: [], existujiciCas: null, uOkraje: false };
+  let predchozi = 0;
+
+  for (let k = 0; k < meze.length; k++) {
+    const okno = Math.min(meze[k], posledni - 1);
+    if (okno <= predchozi) continue;                   // stejný rozsah už prohledaný
+    predchozi = okno;
+
+    const odRadku = Math.max(2, posledni - okno + 1);
+    nalez = hledejRadkyKZapisu_(sheet, odRadku, posledni - odRadku + 1,
+                                sloupec, hledanePsp, hledanyId);
+
+    if (odRadku <= 2) break;                           // tohle byla celá tabulka
+    if (nalez.cileRadky.length && !nalez.uOkraje) break;
+  }
+
+  return nalez;
+}
+
 function zapisCas_(psp, idStroje, akce, cas, prepsat) {
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
@@ -986,20 +1036,7 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
   const posledni = sheet.getLastRow();
   if (posledni < 2) return { zapsanoRadku: 0, jizZapsano: false };
 
-  // Nejdřív zkusíme jen konec tabulky, pak teprve celou. Viz OKNO_ZAPISU.
-  const meze = [Math.min(OKNO_ZAPISU, posledni - 1), posledni - 1];
-  let nalez = null;
-
-  for (let k = 0; k < meze.length; k++) {
-    if (k > 0 && meze[k] <= meze[k - 1]) break;        // širší okno už není
-
-    const odRadku = Math.max(2, posledni - meze[k] + 1);
-    nalez = hledejRadkyKZapisu_(sheet, odRadku, posledni - odRadku + 1,
-                                sloupec, hledanePsp, hledanyId);
-
-    if (odRadku <= 2) break;                           // tohle byla celá tabulka
-    if (nalez.cileRadky.length && !nalez.uOkraje) break;
-  }
+  const nalez = najdiKZapisu_(sheet, posledni, sloupec, hledanePsp, hledanyId);
 
   const cileRadky     = nalez.cileRadky;
   const existujiciCas = nalez.existujiciCas;
@@ -1594,16 +1631,7 @@ function porovnejOknoZapisu() {
 
   const t1 = Date.now();
   const zOkna = seznam.map(function (p) {
-    const meze = [Math.min(OKNO_ZAPISU, posledni - 1), posledni - 1];
-    let nalez = null;
-    for (let k = 0; k < meze.length; k++) {
-      if (k > 0 && meze[k] <= meze[k - 1]) break;
-      const odR = Math.max(2, posledni - meze[k] + 1);
-      nalez = hledejRadkyKZapisu_(sheet, odR, posledni - odR + 1, wms.prijem, p, '');
-      if (odR <= 2) break;
-      if (nalez.cileRadky.length && !nalez.uOkraje) break;
-    }
-    return nalez.cileRadky.join(',');
+    return najdiKZapisu_(sheet, posledni, wms.prijem, p, '').cileRadky.join(',');
   });
   const casOkno = Date.now() - t1;
 
@@ -1622,10 +1650,12 @@ function porovnejOknoZapisu() {
   }
 
   Logger.log('Porovnáno ' + seznam.length + ' PSP.');
-  Logger.log('  zkrácené hledání (' + OKNO_ZAPISU + ' řádků): ' + casOkno + ' ms');
-  Logger.log('  celá tabulka:                  ' + casCela + ' ms');
+  Logger.log('  po stupních (' + OKNA_ZAPISU.join(', ') + ', celá): '
+    + casOkno + ' ms  →  ' + Math.round(casOkno / seznam.length) + ' ms na PSP');
+  Logger.log('  rovnou celá tabulka:            '
+    + casCela + ' ms  →  ' + Math.round(casCela / seznam.length) + ' ms na PSP');
   Logger.log('');
-  Logger.log(chyb ? '⚠ ROZDÍL u ' + chyb + ' PSP – zvyšte OKNO_ZAPISU.'
+  Logger.log(chyb ? '⚠ ROZDÍL u ' + chyb + ' PSP – rozšiřte OKNA_ZAPISU.'
                   : '✓ Zkrácené hledání najde přesně totéž. Je bezpečné.');
 }
 
@@ -1634,11 +1664,19 @@ function testIndex() {
   const t = Date.now();
   const v = getIndexPrijem(true);
   const velikost = JSON.stringify(v).length;
+  const p = v.prislusenstvi || [];
+  const bezP = JSON.stringify(Object.assign({}, v, { prislusenstvi: [] })).length;
+
   Logger.log('Strojů čekaných na příjem: ' + v.pocet);
-  Logger.log('Velikost přenosu: ' + Math.round(velikost / 1024) + ' kB');
+  Logger.log('Příslušenství na dokladech: ' + p.length);
+  Logger.log('Velikost přenosu: ' + Math.round(velikost / 1024) + ' kB'
+    + '   (z toho příslušenství ' + Math.round((velikost - bezP) / 1024) + ' kB)');
   Logger.log('Spočítáno za: ' + (Date.now() - t) + ' ms');
   v.stroje.slice(0, 5).forEach(function (s) {
     Logger.log('  ' + s[0] + '  ' + s[2] + '  ' + s[1]);
+  });
+  p.slice(0, 5).forEach(function (s) {
+    Logger.log('  ----  ' + s[0] + '  ' + s[1]);
   });
 }
 

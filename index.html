@@ -1796,10 +1796,29 @@ async function showConfirmScreenPsp(psp) {
   el('btn-bez-dokladu').style.display = 'flex';
   renderLokacePresets();
 
+  // Doklad se vykreslí nejdřív z indexu, který má čtečka u sebe – to je
+  // hned, bez čekání na server. Index ale zná jen položky, které ještě
+  // nedorazily, takže se hned potom doptáme serveru a výpis se doplní
+  // o to, co už přijaté je. Skladník mezitím vidí, co má vyložit.
+  const zIndexu = polozkyDokladu(psp);
+  const vzor = (state.indexSeznam || [])
+    .filter(s => String(s.psp || '').trim().toUpperCase() === psp.trim().toUpperCase())[0];
+
+  if (zIndexu.length) {
+    vykresliDoklad_(zIndexu, vzor && vzor.pobZ, vzor && vzor.pobDo);
+  }
+
   const info = await jsonp({ action: 'lookupPsp', psp: psp });
   state.currentInfo = info;
 
   if (!info || info.chyba || !info.nalezeno) {
+    // Když už něco svítí z indexu, nepřepisujeme to chybou – jen upozorníme,
+    // že se stav nepodařilo ověřit. Tvrdit "nenalezen" o dokladu, který
+    // ve čtečce vidíme, by bylo zavádějící.
+    if (zIndexu.length) {
+      zobrazVarovani('Stav se nepodařilo ověřit u serveru – výpis je z paměti čtečky.', false);
+      return;
+    }
     el('result-card').classList.add('error');
     el('res-name').textContent = 'Doklad nenalezen';
     zobrazVarovani((info && (info.chyba || info.zprava)) || 'PSP nenalezeno v databázi', true);
@@ -1807,12 +1826,24 @@ async function showConfirmScreenPsp(psp) {
   }
 
   const polozky = info.polozky || [];
-  const stroju  = polozky.filter(p => String(p.idStroje || '').trim()).length;
+  vykresliDoklad_(polozky, info.pobNakladka, info.pobVykladka);
+
   const jizPrijato = polozky.filter(p => p.wmsPrijem || p.svezenoNaCS).length;
+  if (jizPrijato) {
+    el('result-card').classList.add('warning');
+    zobrazVarovani(jizPrijato + ' z ' + polozky.length
+      + ' položek už je přijatých. Potvrzením se časy přepíšou.', false);
+  }
+}
+
+// Vykreslí kartu dokladu. Volá se dvakrát: nejdřív s položkami z indexu,
+// pak znovu s úplným seznamem ze serveru.
+function vykresliDoklad_(polozky, odkud, kam) {
+  const stroju = polozky.filter(p => String(p.idStroje || '').trim()).length;
 
   el('res-name').textContent  = 'Celý doklad – ' + polozky.length + ' položek, z toho ' + stroju + ' strojů';
-  el('res-odkud').textContent = info.pobNakladka || '—';
-  el('res-kam').textContent   = info.pobVykladka || '—';
+  el('res-odkud').textContent = odkud || '—';
+  el('res-kam').textContent   = kam   || '—';
 
   el('psp-polozky-section').style.display = 'flex';
   el('psp-polozky-list').innerHTML = polozky.map(p => {
@@ -1834,12 +1865,6 @@ async function showConfirmScreenPsp(psp) {
 
   state.pspPocet = polozky.length;
   vykresliBezDokladu();
-
-  if (jizPrijato) {
-    el('result-card').classList.add('warning');
-    zobrazVarovani(jizPrijato + ' z ' + polozky.length
-      + ' položek už je přijatých. Potvrzením se časy přepíšou.', false);
-  }
 }
 
 // Co ještě mělo dorazit stejným svozem – stejná pobočka, stejné datum.
@@ -2024,7 +2049,10 @@ async function jsonp(params, timeoutMs) {
   const zaloha = await jsonpJednou_(params, timeoutMs);
   if (!zaloha.spojeniSelhalo) return zaloha;
 
-  return { chyba: 'Nepodařilo se spojit se skriptem' };
+  // Příznak musí zůstat! Bez něj vypadá nedoručené spojení jako obyčejná
+  // chyba a ulozSOverenim by zápis neověřilo – hlásilo by NEPROŠLO i tam,
+  // kde skript v klidu dopsal a ztratila se až cesta zpátky.
+  return { chyba: 'Nepodařilo se spojit se skriptem', spojeniSelhalo: true };
 }
 
 function jsonpJednou_(params, timeoutMs) {
@@ -2529,6 +2557,7 @@ function demoSeznamVydeje() {
 // zastaralý index nemůže způsobit dvojí zápis.
 
 const POLE_INDEXU = ['id','nazev','psp','kodZ','pobZ','kodDo','pobDo','datumSvozu','radek'];
+const POLE_PRISLUSENSTVI = ['psp','nazev'];
 
 function zpracujIndex_(data) {
   const pole  = data.pole || POLE_INDEXU;
@@ -2541,6 +2570,32 @@ function zpracujIndex_(data) {
   state.index = mapa;
   state.indexSeznam = Object.keys(mapa).map(k => mapa[k]);
   state.indexCas = data.cas || null;
+
+  // Příslušenství se neskenuje, takže nemá smysl ho klíčovat podle ID.
+  // Sdružuje se rovnou po dokladech – tak se z něj i vypisuje.
+  const poleP = data.poleP || POLE_PRISLUSENSTVI;
+  const podleDokladu = {};
+  (data.prislusenstvi || []).forEach(radek => {
+    const o = {};
+    poleP.forEach((klic, i) => { o[klic] = radek[i]; });
+    const klic = String(o.psp || '').trim().toUpperCase();
+    if (!klic) return;
+    (podleDokladu[klic] = podleDokladu[klic] || []).push(o.nazev || '');
+  });
+  state.prislusenstvi = podleDokladu;
+}
+
+// Všechno, co na dokladu ještě čeká na příjem – z indexu, bez serveru.
+function polozkyDokladu(psp) {
+  const klic = String(psp || '').trim().toUpperCase();
+  if (!klic) return [];
+
+  const stroje = (state.indexSeznam || [])
+    .filter(s => String(s.psp || '').trim().toUpperCase() === klic)
+    .map(s => ({ idStroje: s.id, nazev: s.nazev }));
+
+  const dalsi = (state.prislusenstvi || {})[klic] || [];
+  return stroje.concat(dalsi.map(nazev => ({ idStroje: '', nazev: nazev })));
 }
 
 function nactiIndexZPameti() {
@@ -2561,6 +2616,7 @@ async function stahniIndex(cerstve) {
   try {
     lsSet('dek_wms_index', JSON.stringify({
       pole: data.pole, stroje: data.stroje, cas: data.cas,
+      poleP: data.poleP, prislusenstvi: data.prislusenstvi,
     }));
   } catch (e) {}
   console.log('[WMS] index – ' + data.pocet + ' strojů čekaných na příjem');
@@ -2628,7 +2684,12 @@ function dalsiZeSvozu(zaznam) {
 
 async function ulozSOverenim(record) {
   const odpoved = await saveRecord(record) || {};
-  if (!odpoved.casovyLimit) return odpoved;
+
+  // Ověřuje se při každém případu, kdy odpověď nedorazila – ať už vypršel
+  // limit, nebo se nepodařilo spojit. V obou případech NEVÍME, jak to
+  // dopadlo; a "nevím" se nesmí hlásit jako "neprošlo".
+  const neviSeVysledek = odpoved.casovyLimit || odpoved.spojeniSelhalo;
+  if (!neviSeVysledek) return odpoved;
 
   const stav = await overZapis(record);
   if (stav.znamo && stav.ulozeno) {
