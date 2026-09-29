@@ -1719,7 +1719,10 @@ async function showConfirmScreen(id) {
       dalsiZPobocky: dalsiZeSvozu(zIndexu).map(s => ({
         idStroje: s.id, nazev: s.nazev, cisloPsp: s.psp, prijato: false,
       })),
-      polozky: [],
+      // Zbytek dokladu se dá poskládat z indexu – od té doby, co nese
+      // i příslušenství. Dřív tu bylo prázdné pole, takže po skenu stroje
+      // nebylo vidět, co k němu na dokladu patří (kotouče, hadice).
+      polozky: polozkyDokladu(zIndexu.psp),
       zIndexu: true,
     };
     state.currentInfo = info;

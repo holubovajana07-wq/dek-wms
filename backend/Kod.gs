@@ -659,6 +659,12 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
     const psp = (a(rA, c.cisloPsp) || '').toString().trim();
     if (!psp) continue;
 
+    // Ručně psané popisky (RŮČNÍ DL a spol.) do WMS nepatří – odbavuje je
+    // logistik. Navíc se stejný text opakuje u zásilek, které spolu
+    // nesouvisejí, takže by se ve výdeji slily do jednoho falešného
+    // "dokladu" a jedno zaškrtnutí by orazítkovalo cizí řádky.
+    if (!jePraveCisloPsp_(psp)) continue;
+
     const kod   = (a(rA, c.idVykladka)  || '').toString().trim() || '???';
     const nazev = (a(rA, c.pobVykladka) || '').toString().trim() || 'Neznámá pobočka';
 
@@ -766,6 +772,9 @@ function getIndexPrijem(cerstve) {
     if (b(rB, wms.prijem)) continue;
     if (a(rA, c.svezenoNaCS)) continue;
     if (a(rA, c.svezeno)) continue;
+
+    // Ruční popisky do WMS nepatří – stejný důvod jako u výdeje.
+    if (!jePraveCisloPsp_(a(rA, c.cisloPsp))) continue;
 
     const id = String(a(rA, c.idStroje) || '').trim();
 
@@ -893,6 +902,17 @@ function ulozPohyb(record) {
   if (!record.akce) return { ok: false, chyba: 'Chybí akce (prijem/vydej)' };
   if (!record.psp && !record.id) return { ok: false, chyba: 'Chybí PSP i ID stroje' };
 
+  // Ruční popisky místo čísla dokladu odbavuje logistik, ne WMS. Kdyby se
+  // sem takový zápis dostal, orazítkoval by všechny řádky se stejným textem
+  // napříč tabulkou – i ty měsíce staré, které s touhle zásilkou nesouvisejí.
+  if (record.psp && !jePraveCisloPsp_(record.psp)) {
+    return {
+      ok: false,
+      chyba: 'Doklad "' + record.psp + '" není běžné PSP – tohle odbavuje logistik, '
+             + 'ne čtečka. Předejte to na logistiku.',
+    };
+  }
+
   const cache = CacheService.getScriptCache();
   if (record.nonce && cache.get('nonce_' + record.nonce)) {
     return { ok: true, duplicita: true, zprava: 'Tento zápis už proběhl' };
@@ -1000,11 +1020,24 @@ function hledejRadkyKZapisu_(sheet, odRadku, pocet, sloupec, hledanePsp, hledany
   return { cileRadky: cileRadky, existujiciCas: existujiciCas, uOkraje: uOkraje };
 }
 
+// Formát dokladu z helpdesku: PSP-500-26-00065.
+function jePraveCisloPsp_(text) {
+  return /^PSP-\d+-\d+-\d+$/.test(String(text || '').trim().toUpperCase());
+}
+
 // Hledá po stupních od konce tabulky (OKNA_ZAPISU) a nakonec v celé.
 // Používá to jak ostrý zápis, tak kontrola porovnejOknoZapisu() – ať se
 // neověřuje něco jiného, než co se doopravdy zapisuje.
 function najdiKZapisu_(sheet, posledni, sloupec, hledanePsp, hledanyId) {
-  const meze = OKNA_ZAPISU.concat([posledni - 1]);
+  // Pravé číslo PSP patří jednomu dokladu, a ten je v tabulce na jednom
+  // místě – takže se dá hledat od konce. Ručně psané popisky (RŮČNÍ DL
+  // a spol.) se ale opakují u zásilek, které spolu nesouvisejí, a leží
+  // kdekoliv. U nich se proto jde rovnou na celou tabulku, aby se zápis
+  // choval stejně jako dřív. Zjištěno 29. 9. 2026 funkcí
+  // porovnejOknoZapisu(): RŮČNÍ DL má řádky 5394 a 7537.
+  const meze = jePraveCisloPsp_(hledanePsp)
+    ? OKNA_ZAPISU.concat([posledni - 1])
+    : [posledni - 1];
   let nalez = { cileRadky: [], existujiciCas: null, uOkraje: false };
   let predchozi = 0;
 
@@ -1640,6 +1673,15 @@ function porovnejOknoZapisu() {
     return hledejRadkyKZapisu_(sheet, 2, posledni - 1, wms.prijem, p, '').cileRadky.join(',');
   });
   const casCela = Date.now() - t2;
+
+  const rucni = seznam.filter(function (p) { return !jePraveCisloPsp_(p); });
+  if (rucni.length) {
+    Logger.log('Ručně psané popisky místo čísla PSP (' + rucni.length + '): '
+      + rucni.join(', '));
+    Logger.log('U nich se hledá vždy v celé tabulce – opakují se na místech,');
+    Logger.log('která spolu nesouvisejí.');
+    Logger.log('');
+  }
 
   let chyb = 0;
   for (let i = 0; i < seznam.length; i++) {
