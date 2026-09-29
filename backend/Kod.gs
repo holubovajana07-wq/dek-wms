@@ -23,6 +23,11 @@ const WMS_CONFIG = {
   wmsPrijemNazev: 'WMS příjem',
   wmsVydejNazev:  'WMS výdej',
 
+  // Zaškrtávat příznaky ve sloupcích T (Svezeno) a V (Odesláno).
+  // Ty sloupce patří druhé automatizaci – kdyby dělaly potíže,
+  // stačí přepnout na false a WMS se jich přestane dotýkat.
+  zaskrtavatPriznaky: true,
+
   // Sloupce v listu DATA (1 = A)
   col: {
     idNakladka:    2,   // B – ID nakládka
@@ -39,6 +44,9 @@ const WMS_CONFIG = {
     datumSvozu:   17,   // Q – Datum svozu
     svezenoNaCS:  18,   // R – Datum svezeno na CS   (JEN ČTEME)
     odeslanoZCS:  19,   // S – Datum odesláno z CS   (JEN ČTEME)
+    svezeno:      20,   // T – Svezeno   ← WMS zaškrtává při příjmu
+    nesvezeno:    21,   // U – Nesvezeno (jen čteme)
+    odeslano:     22,   // V – Odesláno  ← WMS zaškrtává při výdeji
     poznamka:     25,   // Y – Poznámka
     storno:       31,   // AE – Storno
   }
@@ -928,16 +936,29 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     return { zapsanoRadku: 0, jizZapsano: true, existujiciCas: existujiciCas };
   }
 
+  // Zároveň s časem se zaškrtává příznak: příjem → T (Svezeno),
+  // výdej → V (Odesláno). Píše se logická pravda, takže to sedne
+  // jak na zaškrtávací políčko, tak na obyčejné TRUE.
+  const sloupecPriznaku = WMS_CONFIG.zaskrtavatPriznaky
+    ? (akce === 'prijem' ? c.svezeno : c.odeslano)
+    : 0;
+
   // Dávkový zápis souvislých bloků
   let zapsano = 0;
   let zacatek = 0;
   while (zacatek < cileRadky.length) {
     let konec = zacatek;
     while (konec + 1 < cileRadky.length && cileRadky[konec + 1] === cileRadky[konec] + 1) konec++;
-    const pocet   = konec - zacatek + 1;
-    const hodnoty = [];
-    for (let k = 0; k < pocet; k++) hodnoty.push([cas]);
-    sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).setValues(hodnoty);
+    const pocet = konec - zacatek + 1;
+
+    const casy = [], priznaky = [];
+    for (let k = 0; k < pocet; k++) { casy.push([cas]); priznaky.push([true]); }
+
+    sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).setValues(casy);
+    if (sloupecPriznaku) {
+      sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).setValues(priznaky);
+    }
+
     zapsano += pocet;
     zacatek = konec + 1;
   }
@@ -1071,9 +1092,21 @@ function posliUpozorneniBezDokladu_(record, info, cas) {
 
   const predmet = psp + ' dorazilo bez dokladu';
 
+  // Když se odbavoval celý doklad, vypíšeme jeho položky.
+  // Jinak jde o jeden naskenovaný stroj.
+  let castStroj;
+  if (record.id) {
+    castStroj = 'Stroj: ' + record.id + ', ' + (record.nazev || info.nazev || '?') + '\n';
+  } else {
+    const radky = (info.polozky || []).map(function (p) {
+      return '  ' + (p.idStroje ? p.idStroje + '  ' : '(příslušenství)  ') + (p.nazev || '');
+    });
+    castStroj = 'Celý doklad, ' + radky.length + ' položek:\n' + radky.join('\n') + '\n';
+  }
+
   const telo =
       psp + ' dorazilo bez dokladu\n\n'
-    + 'Stroj: ' + (record.id || '?') + ', ' + (record.nazev || info.nazev || '?') + '\n'
+    + castStroj
     + 'Z pobočky: ' + odkud + ' → ' + kam + '\n'
     + 'Přijal: ' + (record.uzivatel || '?') + ', ' + kdy + '\n\n'
     + 'Doklad k vytištění:\n'
@@ -1424,6 +1457,44 @@ function testIndex() {
   v.stroje.slice(0, 5).forEach(function (s) {
     Logger.log('  ' + s[0] + '  ' + s[2] + '  ' + s[1]);
   });
+}
+
+// Ukáže, co je dnes ve sloupcích T (Svezeno), U (Nesvezeno) a V (Odesláno)
+// a jakého jsou typu. Spusťte PŘED ostrým nasazením zaškrtávání –
+// ať WMS píše to samé, co tam píše druhá automatizace.
+function zkontrolujPriznaky() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const c = WMS_CONFIG.col;
+  const posledni = sheet.getLastRow();
+  const od = Math.max(2, posledni - 300);
+  const n = posledni - od + 1;
+
+  const blok = sheet.getRange(od, c.svezeno, n, c.odeslano - c.svezeno + 1).getValues();
+  const pocty = {};
+  let ukazek = 0;
+
+  Logger.log('Sloupce T–V, posledních ' + n + ' řádků:');
+  for (let i = 0; i < n; i++) {
+    ['Svezeno', 'Nesvezeno', 'Odesláno'].forEach(function (nazev, j) {
+      const v = blok[i][j];
+      if (v === '' || v === null) return;
+      const klic = nazev + ': ' + (typeof v) + ' = ' + v;
+      pocty[klic] = (pocty[klic] || 0) + 1;
+    });
+    if (ukazek < 3 && (blok[i][0] !== '' || blok[i][2] !== '')) {
+      Logger.log('  řádek ' + (od + i) + ': T=' + JSON.stringify(blok[i][0])
+        + '  U=' + JSON.stringify(blok[i][1]) + '  V=' + JSON.stringify(blok[i][2]));
+      ukazek++;
+    }
+  }
+
+  Logger.log('');
+  Logger.log('--- Souhrn hodnot ---');
+  Object.keys(pocty).sort().forEach(function (k) { Logger.log('  ' + k + '  (' + pocty[k] + '×)'); });
+  Logger.log('');
+  Logger.log('WMS bude zapisovat logickou pravdu (boolean true).');
+  Logger.log('Když je výše vidět "boolean = true", sedí to. Kdyby tam byl text,');
+  Logger.log('dejte vědět a upravím to.');
 }
 
 function testSeznamKVydeji() {

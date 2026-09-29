@@ -912,7 +912,7 @@
     <div class="manual-or">nebo zadat ručně</div>
 
     <div style="display:flex;gap:8px;">
-      <input class="form-input" id="inp-manual" placeholder="ID stroje (např. 9JT9)" style="flex:1;" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <input class="form-input" id="inp-manual" placeholder="ID stroje nebo číslo PSP" style="flex:1;" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <button class="btn btn-secondary" style="width:auto;padding:0 16px;" onclick="manualConfirm()">→</button>
     </div>
 
@@ -1133,6 +1133,8 @@ const state = {
   },
   currentAction: null,   // 'prijem' | 'vydej'
   currentId: null,
+  currentPsp: null,          // naskenovaný doklad (režim celého PSP)
+  pspPocet: 0,               // kolik položek doklad má
   currentLokace: null,
   currentNonce: null,        // otisk aktuálního skenu (proti dvojímu zápisu)
   prepsatPotvrzeno: null,    // uživatel potvrdil přepis už zapsaného času
@@ -1628,18 +1630,41 @@ function handleScan(raw) {
   if (sCislici.length)       id = sCislici[sCislici.length - 1];
   else if (kandidati.length) id = kandidati[kandidati.length - 1];
 
+  // Čárový kód z papírového dokladu vypadá jinak než štítek na stroji.
+  // Pozná se podle formátu PSP-000-00-00000 a odbaví se celý doklad naráz.
+  const psp = cisty.match(/PSP-\d{2,4}-\d{2}-\d{3,6}/);
+  if (psp) {
+    state.currentId = null;
+    state.currentPsp = psp[0];
+    state.currentLokace = null;
+    showConfirmScreenPsp(psp[0]);
+    return;
+  }
+
   state.currentId = id;
+  state.currentPsp = null;
   state.currentLokace = null;
   showConfirmScreen(id);
 }
 
 function manualConfirm() {
   const val = el('inp-manual').value.trim().toUpperCase();
-  if (!val) { showToast('Zadejte ID stroje', 'error'); return; }
-  if (!state.currentAction) { showToast('Nejdřív vyberte akci', 'error'); return; }
-  state.currentId = val;
-  state.currentLokace = null;
+  if (!val) { showToast('Zadejte ID stroje nebo číslo PSP', 'error'); return; }
   el('inp-manual').value = '';
+
+  // Ručně jde zadat i číslo dokladu – rozpozná se stejně jako u skenu
+  const psp = val.match(/PSP-\d{2,4}-\d{2}-\d{3,6}/);
+  if (psp) {
+    state.currentId = null;
+    state.currentPsp = psp[0];
+    state.currentLokace = null;
+    showConfirmScreenPsp(psp[0]);
+    return;
+  }
+
+  state.currentId = val;
+  state.currentPsp = null;
+  state.currentLokace = null;
   showConfirmScreen(val);
 }
 
@@ -1734,6 +1759,86 @@ async function overStavNaPozadi_(id) {
     zobrazVarovani(info.varovani, false);
     // Stroj už přijatý někým jiným – ven z indexu, ať to nemate dál
     if (info.casPrijmu) odeberZIndexu(id);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  SKEN ČÁROVÉHO KÓDU PSP Z DOKLADU
+// ─────────────────────────────────────────────
+// Když přijede auto s papírovým dokladem, je rychlejší načíst ten
+// místo štítků na jednotlivých strojích. Odbaví se celý doklad naráz –
+// všechno na něm přijelo společně.
+async function showConfirmScreenPsp(psp) {
+  showTab('confirm');
+
+  el('res-id').textContent    = psp;
+  el('res-name').textContent  = 'Načítám doklad…';
+  el('res-psp').textContent   = psp;
+  el('res-odkud').textContent = '…';
+  el('res-kam').textContent   = '…';
+  el('res-cas').textContent   = formatTime(new Date());
+  el('res-akce').textContent  = '📥 Příjem celého dokladu';
+  el('psp-polozky-section').style.display = 'none';
+  el('svoz-section').style.display = 'none';
+  el('result-card').classList.remove('warning','success','error');
+  skryjVarovani();
+
+  state.currentNonce = null;
+  state.prepsatPotvrzeno = null;
+  state.bezDokladu = false;
+  vykresliBezDokladu();
+  el('inp-lokace').value = '';
+
+  // Tlačítko "bez dokladu" zůstává i tady. Naskenované číslo PSP
+  // neznamená, že papír přijel se zásilkou – může být z tiskárny
+  // nebo ho řidič nechal na pobočce.
+  el('lokace-section').style.display  = 'flex';
+  el('btn-bez-dokladu').style.display = 'flex';
+  renderLokacePresets();
+
+  const info = await jsonp({ action: 'lookupPsp', psp: psp });
+  state.currentInfo = info;
+
+  if (!info || info.chyba || !info.nalezeno) {
+    el('result-card').classList.add('error');
+    el('res-name').textContent = 'Doklad nenalezen';
+    zobrazVarovani((info && (info.chyba || info.zprava)) || 'PSP nenalezeno v databázi', true);
+    return;
+  }
+
+  const polozky = info.polozky || [];
+  const stroju  = polozky.filter(p => String(p.idStroje || '').trim()).length;
+  const jizPrijato = polozky.filter(p => p.wmsPrijem || p.svezenoNaCS).length;
+
+  el('res-name').textContent  = 'Celý doklad – ' + polozky.length + ' položek, z toho ' + stroju + ' strojů';
+  el('res-odkud').textContent = info.pobNakladka || '—';
+  el('res-kam').textContent   = info.pobVykladka || '—';
+
+  el('psp-polozky-section').style.display = 'flex';
+  el('psp-polozky-list').innerHTML = polozky.map(p => {
+    const prijato = !!(p.wmsPrijem || p.svezenoNaCS);
+    const odznak = p.idStroje
+      ? `<span class="svoz-id ${prijato ? 'hotovo' : 'ceka'}">${p.idStroje}</span>`
+      : '<span class="result-row-key" style="font-size:11px;">příslušenství</span>';
+    return `
+      <div class="result-row" style="align-items:flex-start;gap:8px;">
+        <span class="svoz-stav ${prijato ? 'hotovo' : 'ceka'}">${prijato ? '✓' : '•'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            ${odznak}
+            <span class="result-row-val" style="font-size:13px;">${p.nazev || '—'}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  state.pspPocet = polozky.length;
+  vykresliBezDokladu();
+
+  if (jizPrijato) {
+    el('result-card').classList.add('warning');
+    zobrazVarovani(jizPrijato + ' z ' + polozky.length
+      + ' položek už je přijatých. Potvrzením se časy přepíšou.', false);
   }
 }
 
@@ -1835,6 +1940,7 @@ function goBack() {
   showTab('scan');
   startScanner();
   state.currentId = null;
+  state.currentPsp = null;
   state.currentLokace = null;
   el('result-card').classList.remove('warning','success','error');
 }
@@ -2061,6 +2167,16 @@ function vykresliBezDokladu() {
   const zapnuto = !!state.bezDokladu;
   el('btn-bez-dokladu').classList.toggle('aktivni', zapnuto);
   el('bez-dokladu-znak').textContent = zapnuto ? '☑' : '☐';
+
+  // U naskenovaného dokladu se odbavuje celý PSP, ať je zapnuto cokoliv
+  if (state.currentPsp && !state.currentId) {
+    const pocet = state.pspPocet ? ' (' + state.pspPocet + ')' : '';
+    el('btn-confirm').innerHTML = zapnuto
+      ? '✓ PŘIJMOUT BEZ DOKLADU' + pocet
+      : '✓ PŘIJMOUT CELÝ DOKLAD' + pocet;
+    return;
+  }
+
   el('btn-confirm').innerHTML = zapnuto ? '✓ PŘIJMOUT BEZ DOKLADU' : '✓ PŘIJMOUT';
 }
 
@@ -2084,14 +2200,20 @@ async function confirmMove() {
   // Nonce = otisk tohoto konkrétního skenu. Když se kvůli výpadku
   // signálu odešle požadavek dvakrát, skript pozná duplicitu
   // a nezapíše záznam podruhé.
+  // Režim celého dokladu: naskenoval se čárový kód PSP, ne štítek stroje.
+  // Prázdné ID říká skriptu "zapiš ke všem řádkům tohoto PSP".
+  const jePspRezim = !!state.currentPsp && !state.currentId;
+
   if (!state.currentNonce) {
-    state.currentNonce = (state.currentId || 'x') + '-' + state.currentAction + '-' + Date.now();
+    state.currentNonce = (state.currentPsp || state.currentId || 'x')
+      + '-' + state.currentAction + '-' + Date.now();
   }
 
   const record = {
-    id:          state.currentId,
-    psp:         info.cisloPsp    || el('res-psp').textContent,
-    nazev:       info.nazev       || el('res-name').textContent,
+    id:          jePspRezim ? '' : state.currentId,
+    psp:         jePspRezim ? state.currentPsp : (info.cisloPsp || el('res-psp').textContent),
+    nazev:       jePspRezim ? ('Celý doklad ' + state.currentPsp)
+                            : (info.nazev || el('res-name').textContent),
     ecPuj:       info.ecPuj       || '',
     akce:        state.currentAction,
     idNakladka:  info.idNakladka  || '',
@@ -2143,9 +2265,9 @@ async function confirmMove() {
 
   // Stroj je přijatý – z indexu v čtečce pryč, ať se neukazuje jako čekaný.
   // Na pozadí se index ještě obnoví ze serveru.
-  if (isPrijem && record.id) {
-    odeberZIndexu(record.id);
-    stahniIndex();
+  if (isPrijem) {
+    if (record.id) odeberZIndexu(record.id);
+    stahniIndex();               // u celého dokladu se index přenačte celý
   }
 
   state.history.unshift(record);
