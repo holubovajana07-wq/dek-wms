@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DEK WMS – testovací QR kódy</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -43,6 +44,21 @@
     font-family: Consolas, monospace; font-size: 11px; color: #777;
     margin-top: 8px; word-break: break-all;
   }
+
+  .sekce-nadpis {
+    font-size: 13px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.6px; color: #C8281A;
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #eee;
+  }
+  .mrizka-siroka {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .karta.doklad { border-color: #C8281A; background: #fffafa; }
+  .karta.doklad .id { font-size: 15px; letter-spacing: 0; }
+  .karta.doklad svg { max-width: 100%; height: auto; }
+  .typ-kodu { font-size: 11px; color: #999; margin-top: 6px; }
 
   .mrizka {
     display: grid;
@@ -97,11 +113,19 @@
 </div>
 
 <div class="vlastni">
-  <input id="vlastni-id" placeholder="Vlastní ID stroje (např. 9JT9)" maxlength="10" autocomplete="off">
+  <input id="vlastni-id" placeholder="Vlastní ID stroje nebo číslo PSP" maxlength="24" autocomplete="off">
   <button onclick="pridejVlastni()">Vytvořit QR</button>
 </div>
 
+<div class="sekce-nadpis">Stroje – štítek na stroji</div>
 <div class="mrizka" id="mrizka"></div>
+
+<div class="sekce-nadpis">Doklady – čárový kód jako na papíru</div>
+<div class="podnadpis">
+  Na dokladu je <strong>čárový kód</strong>, ne QR. Aplikaci je to jedno – skener obojí
+  přečte a pošle jako text. Naskenováním se odbaví celý doklad naráz, včetně příslušenství.
+</div>
+<div class="mrizka-siroka" id="mrizka-psp"></div>
 
 <div class="poznamka">
   <strong>Jak testovat:</strong> v aplikaci otevřete <strong>PŘÍJEM</strong>, namiřte skener na QR
@@ -123,9 +147,9 @@ const STROJE = [
   { id: '18SB', nazev: 'Vysavač průmyslový 40–60 l/s',                psp: 'PSP-700-26-00461', radek: 7512 },
 ];
 
-function pridejKartu(stroj) {
+function pridejKartu(stroj, kam, trida) {
   const karta = document.createElement('div');
-  karta.className = 'karta';
+  karta.className = 'karta' + (trida ? ' ' + trida : '');
 
   const kod = document.createElement('div');
   kod.className = 'kod';
@@ -150,7 +174,7 @@ function pridejKartu(stroj) {
     karta.appendChild(p);
   }
 
-  document.getElementById('mrizka').appendChild(karta);
+  document.getElementById(kam || 'mrizka').appendChild(karta);
 
   new QRCode(kod, {
     text: stroj.id,
@@ -164,7 +188,11 @@ function pridejVlastni() {
   const pole = document.getElementById('vlastni-id');
   const hodnota = pole.value.trim().toUpperCase();
   if (!hodnota) return;
-  pridejKartu({ id: hodnota, nazev: 'Vlastní kód', psp: '' });
+  if (/^PSP-/.test(hodnota)) {
+    pridejDoklad(hodnota, 'vlastní doklad', 'CODE128');
+  } else {
+    pridejKartu({ id: hodnota, nazev: 'Vlastní kód', psp: '' }, 'mrizka');
+  }
   pole.value = '';
   pole.focus();
 }
@@ -173,7 +201,66 @@ document.getElementById('vlastni-id').addEventListener('keydown', function (e) {
   if (e.key === 'Enter') pridejVlastni();
 });
 
-STROJE.forEach(pridejKartu);
+STROJE.forEach(function (s) { pridejKartu(s, 'mrizka'); });
+
+// Doklady – z každého PSP jeden kód, i když je na něm strojů víc
+const DOKLADY = [];
+STROJE.forEach(function (s) {
+  if (s.psp && DOKLADY.indexOf(s.psp) < 0) DOKLADY.push(s.psp);
+});
+
+// Doklad nese ČÁROVÝ kód, ne QR. Kreslíme Code 128 – to je pro takovéhle
+// alfanumerické řetězce nejběžnější. Kdyby ho skener nepřečetl, zkuste
+// tlačítko pro Code 39 pod kartami.
+function pridejDoklad(psp, popis, format) {
+  const karta = document.createElement('div');
+  karta.className = 'karta doklad';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  karta.appendChild(svg);
+
+  const id = document.createElement('div');
+  id.className = 'id';
+  id.textContent = psp;
+  karta.appendChild(id);
+
+  const n = document.createElement('div');
+  n.className = 'nazev';
+  n.textContent = popis;
+  karta.appendChild(n);
+
+  const t = document.createElement('div');
+  t.className = 'typ-kodu';
+  t.textContent = format;
+  karta.appendChild(t);
+
+  document.getElementById('mrizka-psp').appendChild(karta);
+
+  try {
+    JsBarcode(svg, psp, {
+      format: format,
+      width: 2,
+      height: 70,
+      fontSize: 14,
+      margin: 6,
+      displayValue: false,
+    });
+  } catch (e) {
+    t.textContent = 'Kód se nepodařilo vykreslit: ' + e.message;
+  }
+}
+
+DOKLADY.forEach(function (psp) {
+  const pocet = STROJE.filter(function (s) { return s.psp === psp; }).length;
+  const popis = pocet + (pocet === 1 ? ' stroj na dokladu'
+              : (pocet < 5 ? ' stroje na dokladu' : ' strojů na dokladu'));
+  pridejDoklad(psp, popis, 'CODE128');
+});
+
+// Záloha pro případ, že by skener Code 128 nepřečetl
+DOKLADY.slice(0, 1).forEach(function (psp) {
+  pridejDoklad(psp, 'stejný doklad, jiný typ kódu', 'CODE39');
+});
 
 // QR s adresou aplikace – ať se na čtečce nemusí ťukat ručně.
 // Odvozuje se z adresy téhle stránky, takže platí i kdyby se repozitář
