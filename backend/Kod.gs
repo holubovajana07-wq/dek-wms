@@ -1,6 +1,6 @@
 // ============================================================
 // DEK WMS – Google Apps Script backend
-// Verze: 3.3 | Pilotní provoz CS2
+// Verze: 3.4 | Pilotní provoz CS2
 // ============================================================
 // Pracuje nad listem DATA (databáze PSP).
 // Časy zapisuje do VLASTNÍCH sloupců "WMS příjem" / "WMS výdej",
@@ -27,6 +27,22 @@ const WMS_CONFIG = {
   // Ty sloupce patří druhé automatizaci – kdyby dělaly potíže,
   // stačí přepnout na false a WMS se jich přestane dotýkat.
   zaskrtavatPriznaky: true,
+
+  // Barva řádku po zápisu. Kód půjčovny obarvuje řádky sám, ale spouští
+  // se na události "uživatel změnil buňku" – a ta se po zápisu ze skriptu
+  // nevyvolá (Google to tak má schválně, jinak by si skripty spouštěly
+  // reakce donekonečna). WMS si proto barvu nastaví sám, stejnou.
+  // Prázdná hodnota = barvu neměnit.
+  // Pořadí je: přijato na CS = žlutá, odesláno = zelená.
+  // Odstíny odečtené z tabulky funkcí najdiBarvy() (29. 9. 2026).
+  barvaPoPrijmu: '#fff2cc',   // žlutá – přijato na CS
+  barvaPoVydeji: '#b6d7a8',   // zelená – odesláno
+
+  // WMS přebarvuje JEN řádky, které mají některou ze stavových barev.
+  // Červená (#ea9999) a šedá (#d9d9d9) se v datech objevují u řádků,
+  // kde stav sám o sobě nestačí – někdo je označil ručně. Ty se nechávají
+  // být, aby se upozornění nepřepsalo běžnou stavovou barvou.
+  barvyKPrepsani: ['#f6b26b', '#fff2cc', '#b6d7a8', '#ffffff', ''],
 
   // Sloupce v listu DATA (1 = A)
   col: {
@@ -287,7 +303,7 @@ function doGet(e) {
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '3.3', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '3.4', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };
@@ -353,7 +369,7 @@ const OKNO_VYDEJ = 2500;
 function nactiBloky_(sheet, wms, odRadku, pocet) {
   const c = WMS_CONFIG.col;
   const A_OD = c.idNakladka;   // B
-  const A_DO = c.odeslanoZCS;  // S
+  const A_DO = c.odeslano;     // V – ať jsou v bloku i zaškrtávátka T a V
   const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
   const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
 
@@ -422,6 +438,8 @@ function precistZBloku_(b, i, wms) {
     datumSvozu:  b.get(i, c.datumSvozu),
     svezenoNaCS: b.get(i, c.svezenoNaCS),
     odeslanoZCS: b.get(i, c.odeslanoZCS),
+    svezeno:     b.get(i, c.svezeno),
+    odeslano:    b.get(i, c.odeslano),
     storno:      b.get(i, c.storno),
     wmsPrijem:   b.get(i, wms.prijem),
     wmsVydej:    b.get(i, wms.vydej),
@@ -456,12 +474,16 @@ function lookupStroj(id, akce) {
   tik_('načtení ' + radky.length + ' záznamů stroje');
 
   // Vyber přesun, který odpovídá akci
+  // Stav se pozná ze všech tří zdrojů naráz: čas od WMS, datum od druhé
+  // automatizace i zaškrtávátko. Stačí jeden z nich.
+  function jePrijato(r)  { return !!(r.wmsPrijem || r.svezenoNaCS  || r.svezeno); }
+  function jeVydano(r)   { return !!(r.wmsVydej  || r.odeslanoZCS  || r.odeslano); }
+
   let hlavni = null;
   if (akce === 'prijem') {
-    hlavni = radky.filter(function (r) { return !r.wmsPrijem && !r.storno; })[0];
+    hlavni = radky.filter(function (r) { return !jePrijato(r) && !r.storno; })[0];
   } else if (akce === 'vydej') {
-    hlavni = radky.filter(function (r) { return r.wmsPrijem && !r.wmsVydej && !r.storno; })[0];
-    if (!hlavni) hlavni = radky.filter(function (r) { return r.svezenoNaCS && !r.wmsVydej && !r.odeslanoZCS && !r.storno; })[0];
+    hlavni = radky.filter(function (r) { return jePrijato(r) && !jeVydano(r) && !r.storno; })[0];
   }
   if (!hlavni) hlavni = radky[0];
 
@@ -587,10 +609,10 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
   const n = posledni - odRadku + 1;
 
   // Čteme dva bloky sloupců, které opravdu potřebujeme:
-  //   D..S  (pobočky, PSP, ID stroje, název, data svozu a odeslání)
+  //   D..V  (pobočky, PSP, ID stroje, název, data i zaškrtávátka T a V)
   //   AE..  (storno a sloupce WMS)
-  const A_OD = c.idVykladka;                 // 4
-  const A_DO = c.odeslanoZCS;                // 19
+  const A_OD = c.idVykladka;                 // D
+  const A_DO = c.odeslano;                   // V
   const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
   const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
 
@@ -606,8 +628,11 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
     const rA = blokA[i], rB = blokB[i];
     if (b(rB, c.storno)) continue;
 
-    const prijato = b(rB, wms.prijem) || a(rA, c.svezenoNaCS);
-    const vydano  = b(rB, wms.vydej)  || a(rA, c.odeslanoZCS);
+    // Stav se skládá ze tří zdrojů: čas od WMS, datum od druhé automatizace
+    // a zaškrtávátko. Zaškrtávátka se dřív nečetla, takže se ve výdeji
+    // objevovala PSP, která už měla V (Odesláno) zatržené.
+    const prijato = b(rB, wms.prijem) || a(rA, c.svezenoNaCS) || a(rA, c.svezeno);
+    const vydano  = b(rB, wms.vydej)  || a(rA, c.odeslanoZCS) || a(rA, c.odeslano);
     if (!prijato || vydano) continue;
 
     const psp = (a(rA, c.cisloPsp) || '').toString().trim();
@@ -696,7 +721,7 @@ function getIndexPrijem(cerstve) {
   const odRadku = Math.max(2, posledni - OKNO_VYDEJ + 1);
   const n = posledni - odRadku + 1;
 
-  const A_OD = c.idNakladka, A_DO = c.odeslanoZCS;
+  const A_OD = c.idNakladka, A_DO = c.odeslano;   // B..V včetně zaškrtávátek
   const B_OD = Math.min(c.storno, wms.prijem, wms.vydej);
   const B_DO = Math.max(c.storno, wms.prijem, wms.vydej);
 
@@ -709,8 +734,11 @@ function getIndexPrijem(cerstve) {
   for (let i = 0; i < n; i++) {
     const rA = blokA[i], rB = blokB[i];
     if (b(rB, c.storno)) continue;
-    if (b(rB, wms.prijem)) continue;          // už přijato – do indexu nepatří
+    // Do indexu patří jen stroje, které opravdu ještě nedorazily –
+    // tedy ani čas od WMS, ani datum v R, ani zaškrtnuté T.
+    if (b(rB, wms.prijem)) continue;
     if (a(rA, c.svezenoNaCS)) continue;
+    if (a(rA, c.svezeno)) continue;
 
     const id = String(a(rA, c.idStroje) || '').trim();
     if (!id) continue;                        // příslušenství bez ID
@@ -943,6 +971,11 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     ? (akce === 'prijem' ? c.svezeno : c.odeslano)
     : 0;
 
+  const barva = (akce === 'prijem')
+    ? WMS_CONFIG.barvaPoPrijmu
+    : WMS_CONFIG.barvaPoVydeji;
+  const sirkaListu = sheet.getLastColumn();
+
   // Dávkový zápis souvislých bloků
   let zapsano = 0;
   let zacatek = 0;
@@ -957,6 +990,22 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).setValues(casy);
     if (sloupecPriznaku) {
       sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).setValues(priznaky);
+    }
+    if (barva) {
+      // Přebarvujeme jen tam, kde je stavová barva. Ručně označený řádek
+      // (červený, šedý) si svou barvu ponechá – nese informaci navíc.
+      const oblast  = sheet.getRange(cileRadky[zacatek], 1, pocet, sirkaListu);
+      const soucasne = oblast.getBackgrounds();
+      let zmena = false;
+
+      for (let r = 0; r < pocet; r++) {
+        const ted = String(soucasne[r][0] || '').toLowerCase();
+        if (WMS_CONFIG.barvyKPrepsani.indexOf(ted) < 0) continue;   // nechat být
+        for (let s = 0; s < soucasne[r].length; s++) soucasne[r][s] = barva;
+        zmena = true;
+      }
+
+      if (zmena) oblast.setBackgrounds(soucasne);
     }
 
     zapsano += pocet;
@@ -1495,6 +1544,176 @@ function zkontrolujPriznaky() {
   Logger.log('WMS bude zapisovat logickou pravdu (boolean true).');
   Logger.log('Když je výše vidět "boolean = true", sedí to. Kdyby tam byl text,');
   Logger.log('dejte vědět a upravím to.');
+}
+
+// Dobarví řádky, které WMS přijal nebo vydal dřív, než uměl barvit.
+// Projde posledních 600 řádků a srovná barvu se stavem. Vypíše, co by
+// změnil; teprve po nastavení OPRAVDU_ZMENIT na true to skutečně udělá.
+function dobarviStareZaznamy() {
+  const OPRAVDU_ZMENIT = false;
+
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+  const posledni = sheet.getLastRow();
+  const od = Math.max(2, posledni - 600);
+  const n  = posledni - od + 1;
+
+  const stavy  = sheet.getRange(od, c.svezeno, n, c.odeslano - c.svezeno + 1).getValues();
+  const wmsCasy = sheet.getRange(od, Math.min(wms.prijem, wms.vydej), n,
+                    Math.abs(wms.vydej - wms.prijem) + 1).getValues();
+  const posunP = wms.prijem - Math.min(wms.prijem, wms.vydej);
+  const posunV = wms.vydej  - Math.min(wms.prijem, wms.vydej);
+  const pozadi = sheet.getRange(od, c.cisloPsp, n, 1).getBackgrounds();
+
+  let zmen = 0;
+  for (let i = 0; i < n; i++) {
+    const odeslano = stavy[i][2] === true;
+    const svezeno  = stavy[i][0] === true;
+    const zapsalWms = !!(wmsCasy[i][posunP] || wmsCasy[i][posunV]);
+    if (!zapsalWms) continue;
+
+    const maByt = odeslano ? WMS_CONFIG.barvaPoVydeji
+                : (svezeno ? WMS_CONFIG.barvaPoPrijmu : '');
+    if (!maByt) continue;
+
+    const ted = String(pozadi[i][0] || '').toLowerCase();
+    if (ted === maByt) continue;
+    if (WMS_CONFIG.barvyKPrepsani.indexOf(ted) < 0) continue;
+
+    Logger.log('řádek ' + (od + i) + ': ' + ted + ' → ' + maByt);
+    zmen++;
+
+    if (OPRAVDU_ZMENIT) {
+      sheet.getRange(od + i, 1, 1, sheet.getLastColumn()).setBackground(maByt);
+    }
+  }
+
+  Logger.log('');
+  Logger.log(zmen ? 'K opravě: ' + zmen + ' řádků.' : 'Všechno sedí, není co opravovat.');
+  if (zmen && !OPRAVDU_ZMENIT) {
+    Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
+  }
+}
+
+// Najde v tabulce skutečné odstíny podle stavu řádku a vypíše je.
+// Žlutá = přijato na CS (Svezeno ✓, Odesláno ✗)
+// Zelená = odesláno   (Odesláno ✓)
+function najdiBarvy() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const c = WMS_CONFIG.col;
+  const posledni = sheet.getLastRow();
+  const od = Math.max(2, posledni - 600);
+  const n = posledni - od + 1;
+
+  const stavy  = sheet.getRange(od, c.svezeno, n, c.odeslano - c.svezeno + 1).getValues();
+  const pozadi = sheet.getRange(od, c.cisloPsp, n, 1).getBackgrounds();
+
+  const pocty = { prijato: {}, odeslano: {}, ceka: {} };
+
+  for (let i = 0; i < n; i++) {
+    const svezeno  = stavy[i][0] === true;
+    const odeslano = stavy[i][2] === true;
+    const barva    = pozadi[i][0];
+
+    const skupina = odeslano ? 'odeslano' : (svezeno ? 'prijato' : 'ceka');
+    pocty[skupina][barva] = (pocty[skupina][barva] || 0) + 1;
+  }
+
+  function vypis(nadpis, skupina) {
+    Logger.log(nadpis);
+    const klice = Object.keys(pocty[skupina]).sort(function (a, b) {
+      return pocty[skupina][b] - pocty[skupina][a];
+    });
+    if (!klice.length) { Logger.log('   (žádné řádky)'); return; }
+    klice.forEach(function (k) { Logger.log('   ' + k + '   (' + pocty[skupina][k] + '×)'); });
+  }
+
+  Logger.log('Posledních ' + n + ' řádků, barvy podle stavu:');
+  Logger.log('');
+  vypis('ODESLÁNO (má být zelená):', 'odeslano');
+  Logger.log('');
+  vypis('PŘIJATO na CS, zatím neodesláno (má být žlutá):', 'prijato');
+  Logger.log('');
+  vypis('ČEKÁ, ještě nepřijato:', 'ceka');
+  Logger.log('');
+  Logger.log('Nejčastější odstíny u prvních dvou skupin patří do nastavení');
+  Logger.log('barvaPoPrijmu (žlutá) a barvaPoVydeji (zelená).');
+}
+
+// Zjistí, ČÍM je řádek obarvený: pravidlem v tabulce, nebo kódem půjčovny.
+// Podle toho se liší i oprava. Zadejte dva řádky – jeden zelený (obarvil ho
+// kód půjčovny) a jeden, který zapsal WMS a zelený není.
+function zkontrolujFormatovani() {
+  const ZELENY_RADEK = 0;   // ← sem číslo řádku, který JE zelený
+  const WMS_RADEK    = 0;   // ← sem číslo řádku, který zapsal WMS a zelený NENÍ
+
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const c = WMS_CONFIG.col;
+
+  Logger.log('--- Podmíněné formátování listu DATA ---');
+  const pravidla = sheet.getConditionalFormatRules();
+  if (!pravidla.length) {
+    Logger.log('  Žádné. Barvu tedy nastavuje kód, ne pravidlo v tabulce.');
+  } else {
+    pravidla.forEach(function (p, i) {
+      const rozsahy = p.getRanges().map(function (r) { return r.getA1Notation(); }).join(', ');
+      Logger.log('  ' + (i + 1) + '. rozsah ' + rozsahy);
+    });
+  }
+
+  if (!ZELENY_RADEK || !WMS_RADEK) {
+    Logger.log('');
+    Logger.log('Doplňte nahoře čísla řádků a spusťte znovu.');
+    return;
+  }
+
+  Logger.log('');
+  Logger.log('--- Skutečné pozadí buněk (bez podmíněného formátování) ---');
+  [['zelený', ZELENY_RADEK], ['od WMS', WMS_RADEK]].forEach(function (par) {
+    const pozadi = sheet.getRange(par[1], c.cisloPsp).getBackground();
+    const svezeno = sheet.getRange(par[1], c.svezeno).getValue();
+    Logger.log('  řádek ' + par[1] + ' (' + par[0] + '): pozadí ' + pozadi
+      + ', Svezeno = ' + svezeno);
+  });
+
+  Logger.log('');
+  Logger.log('Když má zelený řádek barevné pozadí a ten od WMS bílé,');
+  Logger.log('obarvuje to kód půjčovny – a ten se po zápisu ze skriptu nespustí.');
+}
+
+// Ověří, že se ve výdeji neobjevuje nic, co už má V (Odesláno) zatržené.
+function zkontrolujVydej() {
+  const v = getSeznamKVydeje(true);
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const c = WMS_CONFIG.col;
+
+  const pspVeVydeji = {};
+  v.pobocky.forEach(function (p) {
+    p.pspList.forEach(function (x) { pspVeVydeji[String(x.cisloPsp).trim()] = p.kod; });
+  });
+
+  const posledni = sheet.getLastRow();
+  const od = Math.max(2, posledni - OKNO_VYDEJ + 1);
+  const n = posledni - od + 1;
+  const psp  = sheet.getRange(od, c.cisloPsp, n, 1).getValues();
+  const flag = sheet.getRange(od, c.svezeno, n, c.odeslano - c.svezeno + 1).getValues();
+
+  const spatne = {};
+  for (let i = 0; i < n; i++) {
+    const cislo = String(psp[i][0] || '').trim();
+    if (!cislo || !pspVeVydeji[cislo]) continue;
+    if (flag[i][2] === true) spatne[cislo] = true;      // V = Odesláno
+  }
+
+  Logger.log('Ve výdeji je ' + Object.keys(pspVeVydeji).length + ' PSP.');
+  const seznam = Object.keys(spatne);
+  if (!seznam.length) {
+    Logger.log('✓ Žádné z nich nemá zatržené Odesláno.');
+  } else {
+    Logger.log('⚠ Tahle PSP mají zatržené Odesláno a přesto se nabízejí:');
+    seznam.forEach(function (p) { Logger.log('   ' + p); });
+  }
 }
 
 function testSeznamKVydeji() {
