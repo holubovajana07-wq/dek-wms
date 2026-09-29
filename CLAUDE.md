@@ -119,9 +119,20 @@ Proto si čtečka po přihlášení stáhne **index čekaných strojů** (`actio
 a sken se vyhledává lokálně – **~20 ms místo ~10 s**. Server se ptá jen tehdy,
 když stroj v indexu není (už přijatý, nebo starší než okno 2 500 řádků).
 
-> Index obsahuje **jen stroje bez zapsaného příjmu**. Zastaralý index proto
+> Index obsahuje **jen položky bez zapsaného příjmu**. Zastaralý index proto
 > nemůže způsobit dvojí zápis: souběh zachytí server při ukládání a vrátí
 > „už přijato". Index se navíc zahazuje při každém zápisu (server i čtečka).
+
+Vedle strojů nese index i **příslušenství** (řádky bez ID stroje), jen jako
+`PSP + název`. Díky tomu se po naskenování čárového kódu z dokladu vykreslí
+celá karta **z paměti čtečky** a server se doptá až na pozadí – doplní jen to,
+co je už přijaté. Měřeno 29. 9. 2026: 225 strojů + 228 příslušenství = 40 kB
+(příslušenství stojí 12 kB). Jsou doklady, které stroj neobsahují vůbec
+(oplocení, patky) – bez příslušenství by po skenu papíru zůstaly prázdné.
+
+Zápis času hledá řádek **po stupních** (`OKNA_ZAPISU` = 400, 2 500, celá).
+Měřeno: celá tabulka 3 843 ms na PSP, okno 2 500 řádků 1 387 ms – rozhoduje
+délka úseku, ne počet buněk. Ověřuje `porovnejOknoZapisu()`.
 
 ## Zásadní pravidla
 
