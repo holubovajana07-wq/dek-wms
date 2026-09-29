@@ -90,6 +90,9 @@ Je to běžící automatizace, do které WMS vstupuje jako další účastník.
 | Q | Datum svozu | čte |
 | R | Datum svezeno na CS | **jen čte** – plní jiná automatizace |
 | S | Datum odesláno z CS | **jen čte** – plní jiná automatizace |
+| T | Svezeno | **zaškrtává** při příjmu |
+| U | Nesvezeno | **odškrtává** při příjmu – jinak si odporuje s T |
+| V | Odesláno | **zaškrtává** při výdeji |
 | Y | Poznámka | čte |
 | AE | Storno | čte – stornované řádky se přeskakují |
 | **„WMS příjem"** | přesný čas příjmu | **zapisuje** |
