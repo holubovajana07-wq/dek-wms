@@ -2359,8 +2359,18 @@ async function saveRecord(record) {
 // kliknutím a mohl by nabídnout PSP, které už někdo vydal.
 
 async function nactiSeznamVydeje(cerstve) {
-  el('vydej-info').textContent = cerstve ? 'Načítám znovu z tabulky…' : 'Načítám seznam…';
-  el('vydej-pobocky').innerHTML = '';
+  // Seznam se NEMAŽE. Dřív se obrazovka na dobu načítání vyprázdnila –
+  // a protože se obnovuje i sama každých 30 s, vypadalo to, že se nic
+  // nenačetlo a skladník mačkal Obnovit. Starý seznam zůstane na očích
+  // a jen se přepíše, až dorazí nový.
+  const mameCo = !!(state.vydejData && state.vydejData.pobocky
+                    && state.vydejData.pobocky.length);
+
+  el('vydej-info').textContent = mameCo
+    ? 'Obnovuji… · zatím seznam z ' + formatTime(state.vydejNacteno)
+    : (cerstve ? 'Načítám znovu z tabulky…' : 'Načítám seznam…');
+
+  if (!mameCo) el('vydej-pobocky').innerHTML = '';
 
   // Bez "cerstve" může skript odpovědět z paměti (do 5 minut) – je to
   // podstatně rychlejší. Paměť se zahazuje při každém zápisu času,
@@ -2372,10 +2382,20 @@ async function nactiSeznamVydeje(cerstve) {
         : { action: 'seznamKVydeji' }, 60000);
 
   if (!data || data.chyba || !data.pobocky) {
+    const hlaska = (data && data.chyba) || 'Seznam se nepodařilo načíst';
+
+    // Když už něco na displeji je, necháme to tam – starý seznam je pořád
+    // lepší než prázdná obrazovka. Jen musí být vidět, že je starý.
+    if (mameCo) {
+      el('vydej-info').textContent =
+        '⛔ ' + hlaska + ' · na displeji je seznam z ' + formatTime(state.vydejNacteno);
+      return null;
+    }
+
     el('vydej-info').textContent = '';
     el('vydej-pobocky').innerHTML =
       '<div class="varovani chyba"><span class="varovani-ikona">⛔</span><span>'
-      + ((data && data.chyba) || 'Seznam se nepodařilo načíst') + '</span></div>';
+      + hlaska + '</span></div>';
     return null;
   }
 
