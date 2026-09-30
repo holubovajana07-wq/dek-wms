@@ -1701,6 +1701,53 @@ function porovnejOknoZapisu() {
                   : '✓ Zkrácené hledání najde přesně totéž. Je bezpečné.');
 }
 
+// Kolik PSP se na CS reálně přijímá za den. Počítá se z data svezení na CS
+// (sloupec R), protože to je přesně ten okamžik, který dneska logistik
+// odbavuje ručně. Podklad pro výpočet úspory času.
+function kolikPspDenne() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const c     = WMS_CONFIG.col;
+  const posledni = sheet.getLastRow();
+  if (posledni < 2) { Logger.log('Tabulka je prázdná.'); return; }
+
+  const od = Math.max(2, posledni - 3000);
+  const n  = posledni - od + 1;
+  const blok = sheet.getRange(od, c.cisloPsp, n, c.svezenoNaCS - c.cisloPsp + 1).getValues();
+  const POSUN_R = c.svezenoNaCS - c.cisloPsp;
+
+  // den → množina PSP, ať se doklad o pěti strojích počítá jednou
+  const dny = {};
+  for (let i = 0; i < n; i++) {
+    const psp = String(blok[i][0] || '').trim().toUpperCase();
+    if (!psp || !jePraveCisloPsp_(psp)) continue;
+
+    const den = datumKlic_(blok[i][POSUN_R]);
+    if (!den) continue;
+    (dny[den] = dny[den] || {})[psp] = true;
+  }
+
+  const klice = Object.keys(dny).sort();
+  if (!klice.length) { Logger.log('Ve sloupci R nejsou žádná data.'); return; }
+
+  const pocty = klice.map(function (d) { return Object.keys(dny[d]).length; });
+  const celkem = pocty.reduce(function (a, b) { return a + b; }, 0);
+  const serazene = pocty.slice().sort(function (a, b) { return a - b; });
+  const median = serazene[Math.floor(serazene.length / 2)];
+
+  Logger.log('Období: ' + klice[0] + ' až ' + klice[klice.length - 1]);
+  Logger.log('Dnů s příjmem: ' + klice.length);
+  Logger.log('PSP celkem:    ' + celkem);
+  Logger.log('');
+  Logger.log('PRŮMĚR:  ' + (celkem / klice.length).toFixed(1) + ' PSP na den');
+  Logger.log('MEDIÁN:  ' + median + ' PSP na den');
+  Logger.log('MAXIMUM: ' + serazene[serazene.length - 1] + ' PSP za den');
+  Logger.log('');
+  Logger.log('Posledních 10 dnů:');
+  klice.slice(-10).forEach(function (d) {
+    Logger.log('  ' + d + '   ' + Object.keys(dny[d]).length + ' PSP');
+  });
+}
+
 // Kolik strojů se čeká na příjem a jak velký je přenos do čtečky
 function testIndex() {
   const t = Date.now();
