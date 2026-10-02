@@ -1623,6 +1623,12 @@ function handleScan(raw) {
   // Původní verze hledala vzor v "raw" (bez převodu na velká písmena)
   // a brala PRVNÍ 3–6znakový úsek – u kódu "DEK-9JT9" vracela "DEK".
   const cisty = raw.trim().toUpperCase();
+
+  // Poslední načtený kód si schováme, ať jde v Nastavení zjistit, co skener
+  // doopravdy poslal. Bez toho se u nerozpoznaného kódu jen hádá.
+  state.posledniSken = { kod: cisty, delka: cisty.length, cas: new Date() };
+  try { lsSet('dek_wms_posledni_sken', JSON.stringify(state.posledniSken)); } catch (e) {}
+
   let id = cisty;
   const kandidati = cisty.match(/\b[A-Z0-9]{4}\b/g) || [];
   // Přednost má úsek, který obsahuje aspoň jednu číslici (ID strojů ji mají)
@@ -1631,13 +1637,34 @@ function handleScan(raw) {
   else if (kandidati.length) id = kandidati[kandidati.length - 1];
 
   // Čárový kód z papírového dokladu vypadá jinak než štítek na stroji.
-  // Pozná se podle formátu PSP-000-00-00000 a odbaví se celý doklad naráz.
-  const psp = cisty.match(/PSP-\d{2,4}-\d{2}-\d{3,6}/);
+  const psp = najdiPsp_(cisty);
   if (psp) {
     state.currentId = null;
-    state.currentPsp = psp[0];
+    state.currentPsp = psp;
     state.currentLokace = null;
-    showConfirmScreenPsp(psp[0]);
+    showConfirmScreenPsp(psp);
+    return;
+  }
+
+  // Ani doklad, ani čtyřznakové ID stroje – nemá smysl se ptát serveru
+  // na něco, co zjevně není náš kód. Radši ukážeme, co skener poslal.
+  if (!/^[A-Z0-9]{4}$/.test(id)) {
+    showTab('confirm');
+    el('res-id').textContent    = cisty.slice(0, 40) || '(prázdný kód)';
+    el('res-name').textContent  = 'Tenhle kód neumím přečíst';
+    el('res-psp').textContent   = '—';
+    el('res-odkud').textContent = '—';
+    el('res-kam').textContent   = '—';
+    el('res-cas').textContent   = formatTime(new Date());
+    el('psp-polozky-section').style.display = 'none';
+    el('svoz-section').style.display = 'none';
+    el('lokace-section').style.display = 'none';
+    el('btn-bez-dokladu').style.display = 'none';
+    el('result-card').classList.remove('warning','success');
+    el('result-card').classList.add('error');
+    zobrazVarovani('Skener poslal „' + cisty.slice(0, 40) + '“ ('
+      + cisty.length + ' znaků). Není to ID stroje ani číslo dokladu. '
+      + 'Ukažte tenhle text Janě – podle něj se dá čtení doladit.', true);
     return;
   }
 
@@ -1647,18 +1674,47 @@ function handleScan(raw) {
   showConfirmScreen(id);
 }
 
+// Najde číslo dokladu v naskenovaném textu.
+// Papírový doklad nemusí mít v čárovém kódu přesně "PSP-100-26-00329" –
+// některé tiskárny vynechají pomlčky nebo vytisknou jen číslice. Proto se
+// po neúspěchu porovnají číslice s PSP, která čtečka zná z indexu.
+// Použije se jen tehdy, když sedí právě jedno – jinak bychom hádali.
+function najdiPsp_(text) {
+  const primy = text.match(/PSP-\d{2,4}-\d{2}-\d{3,6}/);
+  if (primy) return primy[0];
+
+  const cifry = text.replace(/\D/g, '');
+  if (cifry.length < 8) return null;
+
+  const znama = {};
+  (state.indexSeznam || []).forEach(s => {
+    if (s.psp) znama[String(s.psp).trim().toUpperCase()] = true;
+  });
+  Object.keys(state.prislusenstvi || {}).forEach(k => { znama[k] = true; });
+
+  const vsechna = Object.keys(znama);
+  let sedi = vsechna.filter(p => p.replace(/\D/g, '') === cifry);
+  if (sedi.length !== 1) {
+    sedi = vsechna.filter(p => {
+      const c = p.replace(/\D/g, '');
+      return c.length >= 8 && (cifry.indexOf(c) >= 0 || c.indexOf(cifry) >= 0);
+    });
+  }
+  return sedi.length === 1 ? sedi[0] : null;
+}
+
 function manualConfirm() {
   const val = el('inp-manual').value.trim().toUpperCase();
   if (!val) { showToast('Zadejte ID stroje nebo číslo PSP', 'error'); return; }
   el('inp-manual').value = '';
 
   // Ručně jde zadat i číslo dokladu – rozpozná se stejně jako u skenu
-  const psp = val.match(/PSP-\d{2,4}-\d{2}-\d{3,6}/);
+  const psp = najdiPsp_(val);
   if (psp) {
     state.currentId = null;
-    state.currentPsp = psp[0];
+    state.currentPsp = psp;
     state.currentLokace = null;
-    showConfirmScreenPsp(psp[0]);
+    showConfirmScreenPsp(psp);
     return;
   }
 
