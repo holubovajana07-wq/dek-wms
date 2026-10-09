@@ -9,11 +9,18 @@
 // ne to, co tam bylo před hodinou.
 // ============================================================
 
-const CACHE = 'dek-wms-v3';
+// Číslo verze zvyšte při každé změně seznamu souborů – stará mezipaměť
+// se tím zahodí a čtečky si stáhnou čistou.
+const CACHE = 'dek-wms-v4';
 
 const SOUBORY = [
   './',
   './index.html',
+  // konfigurace.js nese adresu skriptu a index.html ho načítá JAKO PRVNÍ.
+  // Dřív tu nebyl: bez signálu se stránka vzala z mezipaměti, ale tenhle
+  // soubor se nestáhl, WMS_URL zůstalo nedefinované a aplikace spadla
+  // ještě před vykreslením. Musí tu být.
+  './konfigurace.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',

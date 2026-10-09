@@ -17,8 +17,13 @@
   <!-- Společné nastavení (adresa skriptu) – načíst PŘED hlavním kódem -->
   <script src="konfigurace.js"></script>
 
-  <!-- jsQR – spolehlivý QR skener pro mobilní prohlížeče -->
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <!-- jsQR – čtení QR z kamery. Je to JEDINÁ cizí adresa, kterou aplikace
+       potřebuje, a ve skladu se skenuje laserem, ne kamerou. Načítá se proto
+       přes "defer" a bez čekání: kdyby ho firemní síť zablokovala nebo byla
+       čtečka bez signálu, aplikace naběhne dál a jen nepůjde kamera.
+       Dřív to byla blokující značka – stránka se zasekla na jejím stahování. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"
+          onerror="window.jsQRChybi = true;"></script>
 
   <style>
     :root {

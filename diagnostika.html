@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEK WMS – kontrola čtečky</title>
+<script src="konfigurace.js" onerror="window.konfigChybi = true;"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: #11141c; color: #eef1f6; margin: 0; padding: 18px 16px 48px;
+    font-size: 16px; line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .podnadpis { color: #93a0b4; font-size: 14px; margin-bottom: 18px; }
+
+  .radek {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 13px 14px; border-radius: 10px; margin-bottom: 10px;
+    background: #1b2130; border: 1px solid #2a3244;
+  }
+  .radek .znak { font-size: 20px; line-height: 1.2; flex-shrink: 0; width: 24px; text-align: center; }
+  .radek .telo { flex: 1; min-width: 0; }
+  .radek .nazev { font-weight: 700; font-size: 15px; }
+  .radek .detail { color: #93a0b4; font-size: 13.5px; margin-top: 2px; word-break: break-word; }
+  .radek.ok    { border-color: #2e6b4f; }
+  .radek.chyba { border-color: #8f2e24; background: #2a1a1a; }
+  .radek.ceka  { opacity: 0.65; }
+
+  .tlacitka { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
+  button {
+    font: inherit; font-weight: 700; padding: 15px; border-radius: 10px;
+    border: none; cursor: pointer; width: 100%;
+  }
+  .hlavni { background: #C8281A; color: #fff; }
+  .vedlejsi { background: transparent; color: #93a0b4; border: 1.5px solid #2a3244; }
+
+  .poznamka {
+    margin-top: 22px; padding: 13px 14px; border-radius: 10px;
+    background: #1b2130; border-left: 3px solid #d79a2b; font-size: 13.5px; color: #c7d0dd;
+  }
+  .poznamka strong { color: #eef1f6; display: block; margin-bottom: 3px; }
+  code { font-family: Consolas, monospace; font-size: 12.5px; color: #9fd4ff; }
+</style>
+</head>
+<body>
+
+<h1>Kontrola čtečky</h1>
+<div class="podnadpis">Projde postupně všechno, co aplikace potřebuje, a řekne, kde to vázne.</div>
+
+<div id="vysledky"></div>
+
+<div class="tlacitka">
+  <button class="hlavni" onclick="location.reload()">Spustit znovu</button>
+  <button class="vedlejsi" onclick="vycistit()">Vyčistit aplikaci a stáhnout znovu</button>
+  <button class="vedlejsi" onclick="location.href='./'">Zpět do aplikace</button>
+</div>
+
+<div class="poznamka">
+  <strong>Když tu něco svítí červeně</strong>
+  Vyfoťte celou obrazovku a pošlete ji Janě. Je na ní všechno, co je potřeba —
+  nic dalšího se nemusí zjišťovat.
+</div>
+
+<script>
+var box = document.getElementById('vysledky');
+
+function pridej(nazev) {
+  var d = document.createElement('div');
+  d.className = 'radek ceka';
+  d.innerHTML = '<div class="znak">…</div><div class="telo">'
+    + '<div class="nazev"></div><div class="detail">zkouším…</div></div>';
+  d.querySelector('.nazev').textContent = nazev;
+  box.appendChild(d);
+  return {
+    ok: function (t) { d.className = 'radek ok'; d.querySelector('.znak').textContent = '✓';
+                       d.querySelector('.detail').textContent = t; },
+    chyba: function (t) { d.className = 'radek chyba'; d.querySelector('.znak').textContent = '✕';
+                          d.querySelector('.detail').textContent = t; }
+  };
+}
+
+function cas() { return new Date().toLocaleTimeString('cs-CZ'); }
+
+(async function kontrola() {
+
+  // 1. Síť podle prohlížeče
+  var r1 = pridej('Síť');
+  if (navigator.onLine) r1.ok('Čtečka hlásí, že je připojená.');
+  else r1.chyba('Čtečka hlásí, že je OFFLINE. Zkontrolujte wifi — bez signálu nejde zapsat příjem ani výdej.');
+
+  // 2. Nastavení s adresou skriptu
+  var r2 = pridej('Soubor s adresou (konfigurace.js)');
+  if (window.konfigChybi) {
+    r2.chyba('Nepodařilo se stáhnout. Bez něj aplikace neví, kam se má hlásit.');
+  } else if (typeof WMS_URL === 'undefined' || !WMS_URL) {
+    r2.chyba('Stáhl se, ale adresa v něm není vyplněná.');
+  } else {
+    r2.ok(WMS_URL.slice(0, 60) + '…');
+  }
+
+  // 3. Stránka aplikace ze sítě
+  var r3 = pridej('Stažení aplikace');
+  try {
+    var t = Date.now();
+    var resp = await fetch('./index.html?kontrola=' + t, { cache: 'no-store' });
+    if (resp.ok) r3.ok('Staženo za ' + (Date.now() - t) + ' ms.');
+    else r3.chyba('Server odpověděl chybou ' + resp.status + '.');
+  } catch (e) {
+    r3.chyba('Nepodařilo se stáhnout: ' + e.message + '. Nejspíš chybí signál.');
+  }
+
+  // 4. Odpovídá Apps Script?
+  var r4 = pridej('Spojení se skriptem');
+  if (typeof WMS_URL === 'undefined' || !WMS_URL) {
+    r4.chyba('Přeskočeno — není známá adresa skriptu.');
+  } else {
+    try {
+      var t4 = Date.now();
+      var ctrl = new AbortController();
+      var budik = setTimeout(function () { ctrl.abort(); }, 45000);
+      var o = await fetch(WMS_URL + '?action=ping', { signal: ctrl.signal });
+      clearTimeout(budik);
+      var txt = await o.text();
+      var data = JSON.parse(txt);
+      if (data && data.ok) {
+        r4.ok('Skript odpověděl za ' + (Date.now() - t4) + ' ms. Verze ' + (data.verze || '?')
+              + ', list ' + (data.list || '?') + '.');
+      } else {
+        r4.chyba('Skript odpověděl, ale hlásí chybu: ' + txt.slice(0, 120));
+      }
+    } catch (e) {
+      r4.chyba(e.name === 'AbortError'
+        ? 'Skript neodpověděl do 45 sekund.'
+        : 'Nepodařilo se spojit: ' + e.message);
+    }
+  }
+
+  // 5. Seznam skladníků – ověří, že backend opravdu čte tabulku
+  var r5 = pridej('Seznam skladníků z tabulky');
+  if (typeof WMS_URL === 'undefined' || !WMS_URL) {
+    r5.chyba('Přeskočeno — není známá adresa skriptu.');
+  } else {
+    try {
+      var o5 = await fetch(WMS_URL + '?action=uzivatele');
+      var d5 = await o5.json();
+      if (d5 && d5.uzivatele && d5.uzivatele.length) {
+        r5.ok(d5.uzivatele.length + ' skladníků: ' + d5.uzivatele.slice(0, 3).join(', ') + '…');
+      } else {
+        r5.chyba('Skript odpověděl, ale seznam je prázdný. Zkontrolujte list UZIVATELE.');
+      }
+    } catch (e) {
+      r5.chyba('Nepodařilo se načíst: ' + e.message);
+    }
+  }
+
+  // 6. Nainstalovaná aplikace (service worker)
+  var r6 = pridej('Nainstalovaná aplikace');
+  if (!('serviceWorker' in navigator)) {
+    r6.chyba('Tenhle prohlížeč instalaci na plochu nepodporuje.');
+  } else {
+    try {
+      var reg = await navigator.serviceWorker.getRegistrations();
+      if (!reg.length) r6.ok('Zatím nenainstalovaná — běží přímo z webu. To nevadí.');
+      else r6.ok(reg.length + '× nainstalovaná. Když se chová divně, použijte tlačítko níž.');
+    } catch (e) { r6.chyba('Nepodařilo se zjistit: ' + e.message); }
+  }
+
+  // 7. Uložiště – app si do něj ukládá přihlášení a seznam strojů
+  var r7 = pridej('Paměť čtečky');
+  try {
+    localStorage.setItem('dek_test', '1');
+    localStorage.removeItem('dek_test');
+    var idx = localStorage.getItem('dek_wms_index');
+    r7.ok(idx ? 'Funguje. Uložený seznam strojů: ' + Math.round(idx.length / 1024) + ' kB.'
+              : 'Funguje. Zatím prázdná — seznam se stáhne po přihlášení.');
+  } catch (e) {
+    r7.chyba('Ukládání je zakázané. Aplikace poběží, ale po každém spuštění se bude přihlašovat znovu.');
+  }
+
+  // 8. Čtení QR kamerou – nepovinné
+  var r8 = pridej('Čtení QR kamerou (nepovinné)');
+  if (window.jsQRChybi || typeof jsQR === 'undefined') {
+    r8.ok('Knihovna se nestáhla — kamera nepůjde. Skenování laserem funguje dál.');
+  } else {
+    r8.ok('Připravené.');
+  }
+
+  var konec = document.createElement('div');
+  konec.className = 'podnadpis';
+  konec.style.marginTop = '16px';
+  konec.textContent = 'Kontrola proběhla ' + cas() + '.';
+  box.appendChild(konec);
+})();
+
+async function vycistit() {
+  try {
+    if ('serviceWorker' in navigator) {
+      var reg = await navigator.serviceWorker.getRegistrations();
+      for (var i = 0; i < reg.length; i++) await reg[i].unregister();
+    }
+    if (window.caches) {
+      var k = await caches.keys();
+      for (var j = 0; j < k.length; j++) await caches.delete(k[j]);
+    }
+    alert('Vyčištěno. Aplikace se teď načte znovu ze sítě.\n\nPřihlášení zůstává.');
+    location.href = './';
+  } catch (e) {
+    alert('Nepodařilo se vyčistit: ' + e.message);
+  }
+}
+</script>
+
+</body>
+</html>
