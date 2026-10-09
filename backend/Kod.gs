@@ -1408,8 +1408,40 @@ function pismenoSloupce_(cislo) {
 function nastavSheetId() {
   const ID = 'SEM_VLOZTE_ID_TABULKY';
   if (ID === 'SEM_VLOZTE_ID_TABULKY') throw new Error('Nejdřív do funkce vložte skutečné ID tabulky.');
+
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', ID);
+  zahodMezipamet();
+
+  // Vypíšeme jméno tabulky, ať je hned vidět, jestli se trefilo do té správné.
+  const ss = SpreadsheetApp.openById(ID);
   Logger.log('SHEET_ID nastaveno.');
+  Logger.log('  tabulka: ' + ss.getName());
+  Logger.log('  adresa:  ' + ss.getUrl());
+}
+
+// Zahodí uložený index a seznam k výdeji.
+// POZOR: po přepnutí tabulky je to nutné. Skript si obojí pamatuje pět minut,
+// takže bez zahození by čtečky ještě chvíli dostávaly data z té předchozí –
+// a skladník by viděl stroje, které v nové tabulce vůbec nejsou.
+function zahodMezipamet() {
+  try { CacheService.getScriptCache().removeAll(['seznam_vydej', 'index_prijem']); } catch (e) {}
+  zapomen_();
+  Logger.log('Mezipaměť zahozena.');
+}
+
+// Řekne, do které tabulky WMS právě zapisuje. Spusťte kdykoliv při pochybnostech.
+function kteraTabulka() {
+  const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) { Logger.log('⚠ SHEET_ID není nastaveno – skript záměrně neběží.'); return; }
+
+  const ss = SpreadsheetApp.openById(id);
+  Logger.log('WMS zapisuje do:');
+  Logger.log('  ' + ss.getName());
+  Logger.log('  ' + ss.getUrl());
+  Logger.log('');
+  Logger.log(id === '1BKvJXEUjrATA9d1ZMvU--DWzLU2X5e6kSlss6NaDWu8'
+    ? '✓ OSTRÁ tabulka – zápisy jdou do ostrého provozu.'
+    : '⚠ Není to ostrá tabulka. Pokud čekáte ostrý provoz, přepněte SHEET_ID.');
 }
 
 // Nastaví adresu, kam chodí upozornění "stroj bez dokladu".

@@ -183,7 +183,13 @@ Přístup (v3.2) – **přihlášení je zároveň ochranou**:
 Adresa skriptu je v `konfigurace.js` (`WMS_URL`), takže **na čtečce se nenastavuje
 nic** – stačí jméno a PIN. Cena za to: adresa je ve veřejném repozitáři. Sama
 o sobě je ale k ničemu, protože bez platného přihlášení skript neodpoví.
-Proto **PINy aspoň pětimístné** – jsou jedinou zábranou.
+
+**PINy jsou čtyřmístné** (rozhodnuto 9. 10. 2026 – skladníci je zadávají v rukavicích
+na malém displeji, delší PIN znamenal víc překlepů). Čtyři číslice = 10 000 možností.
+Hlavní ochranou proto není délka, ale **pauza po pěti chybných pokusech**
+(`prihlas()`, pět minut, počítá se zvlášť pro každé jméno). Uhodnout PIN hrubou silou
+tím trvá desítky hodin na jednoho skladníka. Nikdy tu pauzu neodstraňovat – bez ní
+je čtyřmístný PIN prolomený za pár minut.
 
 Zbývá:
 - **Sken čárového kódu PSP při příjmu** – backend `lookupPsp()` hotový, UI ne
