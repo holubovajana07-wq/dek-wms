@@ -1091,12 +1091,22 @@
     <div class="divider"></div>
 
     <div class="section-title">Lokace ve skladu – předvolby</div>
-    <div class="form-note">
-      Upravte předvolby lokací podle vašeho skladu. Oddělte čárkou.<br>
-      Např.: A1, A2, A3, B1, B2, B3, C1, C2
+
+    <!-- Když lokace přicházejí z konfigurace.js, políčko se neukazuje –
+         jinak by vznikl dojem, že se dají na čtečce přenastavit. -->
+    <div id="blok-lokace">
+      <div class="form-note">
+        Upravte předvolby lokací podle vašeho skladu. Oddělte čárkou.<br>
+        Např.: A1, A2, A3, B1, B2, B3, C1, C2
+      </div>
+      <input class="form-input" id="set-lokace" placeholder="A1, A2, A3, B1, B2, B3">
+      <button class="btn btn-secondary" onclick="saveLokace()">Uložit lokace</button>
     </div>
-    <input class="form-input" id="set-lokace" placeholder="A1, A2, A3, B1, B2, B3">
-    <button class="btn btn-secondary" onclick="saveLokace()">Uložit lokace</button>
+
+    <div class="form-note" id="info-lokace" style="display:none;">
+      Lokace jsou společné pro všechny čtečky a nastavují se centrálně.
+      Na čtečce se nemění — kdyby bylo potřeba je upravit, řekněte Janě.
+    </div>
 
     <div class="divider"></div>
 
@@ -1180,6 +1190,13 @@ function jeUrlZKodu() {
   return typeof WMS_URL === 'string' && WMS_URL.length > 0;
 }
 
+// Lokace se stejně jako adresa nastavují centrálně v konfigurace.js,
+// aby se nemusely ťukat na každé čtečce zvlášť.
+function jsouLokaceZKodu() {
+  return typeof WMS_LOKACE !== 'undefined'
+      && Array.isArray(WMS_LOKACE) && WMS_LOKACE.length > 0;
+}
+
 function loadConfig() {
   const saved = lsGet('dek_wms_config');
   if (saved) {
@@ -1188,6 +1205,8 @@ function loadConfig() {
   // Adresa z konfigurace.js vždy přebije to, co má čtečka uložené z minula.
   // Jinak by po změně adresy zůstaly čtečky viset na té staré.
   if (jeUrlZKodu()) state.config.scriptUrl = WMS_URL;
+  // Totéž pro lokace – změna v konfiguraci se má projevit na všech čtečkách.
+  if (jsouLokaceZKodu()) state.config.lokacePresets = WMS_LOKACE.slice();
   // Populate settings fields
   setTimeout(() => {
     el('set-script-url').value = state.config.scriptUrl || '';
@@ -1512,6 +1531,8 @@ function showTab(name) {
     // jinak by vznikl dojem, že se dá na čtečce přenastavit.
     el('blok-pripojeni').style.display = jeUrlZKodu() ? 'none' : 'block';
     el('info-pripojeni').style.display = jeUrlZKodu() ? 'block' : 'none';
+    el('blok-lokace').style.display    = jsouLokaceZKodu() ? 'none' : 'block';
+    el('info-lokace').style.display    = jsouLokaceZKodu() ? 'block' : 'none';
     el('set-script-url').value = state.config.scriptUrl || '';
     el('set-token').value = state.config.token || '';
     el('set-location').value = state.config.location || 'CS2';
