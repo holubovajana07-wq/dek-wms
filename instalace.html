@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEK WMS – instalace na čtečku</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: #fff; color: #111; margin: 0; padding: 28px 24px;
+    max-width: 760px; margin-inline: auto;
+  }
+  h1 { font-size: 23px; margin: 0 0 4px; }
+  .podnadpis { color: #666; font-size: 14px; margin-bottom: 26px; }
+
+  .karta {
+    display: flex; gap: 26px; align-items: center; flex-wrap: wrap;
+    border: 2px solid #C8281A; border-radius: 12px;
+    padding: 22px; background: #fff6f5; margin-bottom: 26px;
+  }
+  .qr { flex-shrink: 0; background: #fff; padding: 10px; border-radius: 8px; }
+  .qr img, .qr canvas { display: block; }
+  .vedle { flex: 1; min-width: 240px; }
+  .vedle h2 { font-size: 17px; margin: 0 0 8px; }
+  .adresa {
+    font-family: Consolas, monospace; font-size: 13px; color: #444;
+    background: #fff; border: 1px solid #e3d9d7; border-radius: 6px;
+    padding: 8px 10px; word-break: break-all; margin-top: 10px;
+  }
+
+  ol.kroky { margin: 0; padding-left: 22px; }
+  ol.kroky > li { margin-bottom: 14px; line-height: 1.55; }
+  ol.kroky strong { font-weight: 700; }
+  .klavesa {
+    display: inline-block; border: 1px solid #ccc; border-radius: 4px;
+    padding: 0 6px; font-family: Consolas, monospace; font-size: 13px; background: #f7f7f7;
+  }
+
+  .sekce-nadpis {
+    font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #C8281A; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #eee;
+  }
+
+  .poznamka {
+    margin-top: 22px; padding: 14px 16px; background: #fff8e6;
+    border-left: 4px solid #f39c12; border-radius: 6px; font-size: 13.5px; line-height: 1.55;
+  }
+  .poznamka strong { display: block; margin-bottom: 4px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin-top: 4px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #777; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+
+  @media print {
+    body { padding: 10px; }
+    .karta { background: #fff; }
+    .poznamka { background: #fff; }
+  }
+</style>
+</head>
+<body>
+
+<h1>DEK WMS – nastavení nové čtečky</h1>
+<div class="podnadpis">
+  Urovo DT66 · centrální sklad CS2 · trvá to asi dvě minuty
+</div>
+
+<div class="karta">
+  <div class="qr" id="qr"></div>
+  <div class="vedle">
+    <h2>Naskenujte tenhle kód do adresního řádku</h2>
+    <div>Adresa se vypíše sama a stránka se rovnou otevře — nic se nepřepisuje ručně.</div>
+    <div class="adresa" id="adresa"></div>
+  </div>
+</div>
+
+<div class="sekce-nadpis">Postup</div>
+<ol class="kroky">
+  <li>Na čtečce otevřít <strong>Chrome</strong>.</li>
+  <li>Klepnout do <strong>adresního řádku</strong> nahoře, ať v něm bliká kurzor.</li>
+  <li>Namířit skener na QR kód výše a <strong>zmáčknout spoušť</strong>.
+      Adresa se vypíše a stránka se otevře sama.</li>
+  <li>Menu <span class="klavesa">⋮</span> → <strong>Přidat na plochu</strong>
+      (někdy se jmenuje <em>Nainstalovat aplikaci</em>).</li>
+  <li>Potvrdit název <strong>DEK WMS</strong>.</li>
+  <li>Od téhle chvíle spouštět <strong>jen přes ikonu na ploše</strong>, ne přes prohlížeč.</li>
+  <li>Přihlásit se jménem a <strong>čtyřmístným PINem</strong>. Přihlášení platí 12 hodin.</li>
+</ol>
+
+<div class="poznamka">
+  <strong>Když se po skenu nic nevypíše</strong>
+  Skener nejspíš neposílá Enter nebo nemá zapnutý typ kódu. Nastavuje se to v aplikaci
+  skeneru na čtečce: <em>Scanner Settings → Suffix → Enter</em> a
+  <em>Scanner Settings → Symbologies → Code 128</em>. Totéž potřebuje aplikace
+  pro skenování dokladů, takže se to vyplatí nastavit rovnou.
+</div>
+
+<div class="sekce-nadpis">Co se na čtečce nastavuje</div>
+<table>
+  <tr><th>Co</th><th>Kde</th></tr>
+  <tr><td>Adresa aplikace</td><td>Nikde — je součástí aplikace</td></tr>
+  <tr><td>Jméno a PIN</td><td>Při prvním spuštění, pak jednou za 12 hodin</td></tr>
+  <tr><td>Aktualizace</td><td>Stahují se samy při každém spuštění</td></tr>
+  <tr><td>Skener</td><td>Suffix = Enter, zapnutý Code 128</td></tr>
+</table>
+
+<div class="poznamka">
+  <strong>Čtečka bez signálu</strong>
+  Aplikace naběhne i bez wifi a stroj v ní jde vyhledat — pracuje se seznamem,
+  který má u sebe. Zapsat příjem nebo výdej ale bez signálu nejde; skladník uvidí,
+  že se zápis nepovedl, a musí ho zopakovat, až bude signál.
+</div>
+
+<script>
+// Adresa se odvodí z toho, odkud je stránka otevřená – platí i kdyby se
+// repozitář přejmenoval. Při otevření ze souboru na disku se použije známá.
+var ADRESA = location.protocol.indexOf('http') === 0
+  ? location.href.replace(/instalace\.html.*$/, '')
+  : 'https://holubovajana07-wq.github.io/dek-wms/';
+
+document.getElementById('adresa').textContent = ADRESA;
+new QRCode(document.getElementById('qr'), {
+  text: ADRESA,
+  width: 190,
+  height: 190,
+  correctLevel: QRCode.CorrectLevel.M
+});
+</script>
+
+</body>
+</html>
