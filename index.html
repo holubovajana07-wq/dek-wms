@@ -917,9 +917,16 @@
     <div class="manual-or">nebo zadat ručně</div>
 
     <div style="display:flex;gap:8px;">
-      <input class="form-input" id="inp-manual" placeholder="ID stroje nebo číslo PSP" style="flex:1;" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <input class="form-input" id="inp-manual" placeholder="ID stroje nebo konec čísla PSP" style="flex:1;" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <button class="btn btn-secondary" style="width:auto;padding:0 16px;" onclick="manualConfirm()">→</button>
     </div>
+
+    <div class="form-note" style="margin-top:6px;">
+      U dokladu stačí poslední číslice, např. <strong>122</strong> místo celého PSP-820-26-00122.
+    </div>
+
+    <!-- Když konec čísla sedí na víc dokladů, vypíšou se sem k výběru -->
+    <div id="psp-vyber" style="display:none;flex-direction:column;gap:8px;margin-top:10px;"></div>
 
   </div>
 
@@ -1718,23 +1725,74 @@ function najdiPsp_(text) {
   });
   Object.keys(state.prislusenstvi || {}).forEach(k => { znama[k] = true; });
 
-  const vsechna = Object.keys(znama);
-  let sedi = vsechna.filter(p => p.replace(/\D/g, '') === cifry);
-  if (sedi.length !== 1) {
-    sedi = vsechna.filter(p => {
-      const c = p.replace(/\D/g, '');
-      return c.length >= 8 && (cifry.indexOf(c) >= 0 || c.indexOf(cifry) >= 0);
-    });
-  }
+  const sedi = kandidatiPsp_(cifry);
   return sedi.length === 1 ? sedi[0] : null;
+}
+
+// Vrátí všechna známá PSP, na která zadané číslice sedí.
+// Skladník nemusí ťukat celé PSP-820-26-00122 – stačí konec, typicky
+// poslední tři až pět číslic. Čím míň číslic, tím víc dokladů může sedět,
+// proto se při víc shodách nabídne výběr místo tipování.
+function kandidatiPsp_(cifry) {
+  cifry = String(cifry || '').replace(/\D/g, '');
+  if (cifry.length < 3) return [];
+
+  const znama = {};
+  (state.indexSeznam || []).forEach(s => {
+    if (s.psp) znama[String(s.psp).trim().toUpperCase()] = true;
+  });
+  Object.keys(state.prislusenstvi || {}).forEach(k => { znama[k] = true; });
+  const vsechna = Object.keys(znama);
+
+  // Nejdřív přesná shoda všech číslic, pak shoda na konci čísla.
+  const presne = vsechna.filter(p => p.replace(/\D/g, '') === cifry);
+  if (presne.length) return presne;
+
+  return vsechna.filter(p => p.replace(/\D/g, '').endsWith(cifry));
+}
+
+// Vypíše doklady k výběru, když zadaný konec čísla sedí na víc z nich.
+function nabidniPsp_(seznam) {
+  const box = el('psp-vyber');
+  box.innerHTML = '<div class="form-note">Sedí víc dokladů — vyberte ten svůj:</div>'
+    + seznam.slice(0, 8).map(p => {
+        const kus = (state.indexSeznam || []).filter(s =>
+          String(s.psp).trim().toUpperCase() === p)[0];
+        const odkud = kus ? (kus.pobZ || kus.kodZ || '') : '';
+        return '<button class="btn btn-secondary" style="text-align:left;"'
+          + ' onclick="vyberPsp(\'' + p + '\')">' + p
+          + (odkud ? ' <span style="opacity:.7;font-weight:400;"> · ' + odkud + '</span>' : '')
+          + '</button>';
+      }).join('');
+  box.style.display = 'flex';
+}
+
+function vyberPsp(psp) {
+  el('psp-vyber').style.display = 'none';
+  state.currentId = null;
+  state.currentPsp = psp;
+  state.currentLokace = null;
+  showConfirmScreenPsp(psp);
 }
 
 function manualConfirm() {
   const val = el('inp-manual').value.trim().toUpperCase();
   if (!val) { showToast('Zadejte ID stroje nebo číslo PSP', 'error'); return; }
   el('inp-manual').value = '';
+  el('psp-vyber').style.display = 'none';
 
-  // Ručně jde zadat i číslo dokladu – rozpozná se stejně jako u skenu
+  // Samé číslice a není to čtyřznakové ID stroje → bere se to jako konec
+  // čísla dokladu. Tím odpadá ťukání celého PSP-820-26-00122 na malé
+  // klávesnici v rukavicích.
+  if (/^\d{3,}$/.test(val)) {
+    const kand = kandidatiPsp_(val);
+    if (kand.length === 1) { vyberPsp(kand[0]); return; }
+    if (kand.length > 1)   { nabidniPsp_(kand); return; }
+    showToast('Žádný čekající doklad nekončí na ' + val, 'error');
+    return;
+  }
+
+  // Ručně jde zadat i celé číslo dokladu – rozpozná se stejně jako u skenu
   const psp = najdiPsp_(val);
   if (psp) {
     state.currentId = null;
