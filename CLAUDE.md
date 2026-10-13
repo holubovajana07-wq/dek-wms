@@ -105,9 +105,35 @@ Položky bez ID stroje (sl. I prázdné) jsou příslušenství a párují se p�
 
 ## Zařízení
 
-**Urovo DT66** – Android čtečka s laserovým skenerem, který se chová jako
-klávesnice (HID): načte kód a stiskne Enter. Aplikace to odchytává globálním
-listenerem, nemusí být aktivní žádné pole. Malý displej → velká tlačítka.
+**Urovo DT66** – Android čtečka se skenovacím modulem. Malý displej → velká
+tlačítka. Nastavení je v aplikaci **ScanSettings** na čtečce, ne v naší aplikaci,
+a dělá se **na každém kusu zvlášť**.
+
+Rozchození stálo den hledání (13. 10. 2026), takže pro příště:
+
+| Co | Kde | Musí být |
+|---|---|---|
+| Výstup skenu | ScanSettings → Output mode | **Keyboard** (z výroby bývá `Intent output`, který webová stránka nevidí) |
+| Enter na konci | Output mode → Action key character | `Enter Key` |
+| Zapnutý skener | ScanSettings → Scanner Input → Enable | zapnuto |
+| Pípnutí | Output mode → Sounds | zapnout, jinak skladník nepozná úspěch |
+
+> ⚠️ **Kamera a skener si berou stejný hardware.** Když běží náhled kamery,
+> spoušť nemusí vůbec zabrat a vypadá to jako rozbitý skener. Proto se kamera
+> **nespouští sama** – je za tlačítkem a po skenu se vypne. Nikdy to nevracet
+> na automatické spouštění.
+
+> ⚠️ **„Automatic Text Mode" nevkládá stisky kláves, ale text přes IME.**
+> Globální `keydown` listener takový sken nevidí. Aplikace proto drží zaměřené
+> neviditelné pole (`#sken-zachyt`) a čte `input`. Obě cesty zůstávají vedle sebe.
+
+> ⚠️ **Android pouští `focus()` hlavně během doteku.** Zaměření se proto nastavuje
+> synchronně v obsluze doteku (přepnutí na příjem, tlačítko Zpět, dotek kamkoliv
+> na obrazovce příjmu), ne přes `setTimeout`. Jinak skladník musí nejdřív klepnout
+> do pole, aby měl sken kam spadnout.
+
+**Čárový kód na dokladu obsahuje číslo PSP** (Code 128, ověřeno skenem
+13. 10. 2026). Nadpis „Příkaz k jízdě" nad ním je jen popisek formuláře.
 
 ## Rychlost – proč je to postavené takhle
 
@@ -191,18 +217,32 @@ Hlavní ochranou proto není délka, ale **pauza po pěti chybných pokusech**
 tím trvá desítky hodin na jednoho skladníka. Nikdy tu pauzu neodstraňovat – bez ní
 je čtyřmístný PIN prolomený za pár minut.
 
+Ostrý provoz od 1. 10. 2026 (`SHEET_ID` → `1BKvJXEU…`, ověřuje `kteraTabulka()`).
+
+Hotovo od října:
+- **Sken dokladu i stroje** funguje na čtečce včetně laseru – viz Zařízení
+- **Doklad jde zadat koncem čísla** (`122` místo celého PSP); při víc shodách
+  se nabídne výběr, nikdy se netipuje
+- **Lokace řídí list `LOKACE`** – zapnutí/vypnutí + obsazenost počítaná
+  z `POHYBY`. Jedou do čtečky s indexem, takže změna je všude do minuty.
+  Přepočet: `prepocitejLokace()`, ideálně časovou spouští po hodině.
+- **Aplikace se aktualizuje sama** – porovnává `VERZE_APP` se souborem na webu
+  při startu, po 15 minutách a po návratu z pozadí; přenačte se až na skenovací
+  nebo přihlašovací obrazovce, aby nikdo nepřišel o rozdělaný příjem.
+  **Po nasazení tedy stačí push, na čtečky se nechodí.**
+- **`diagnostika.html`** – projde síť, konfiguraci, verzi, ping, seznam
+  skladníků, instalaci, paměť i skener; umí vyčistit nainstalovanou aplikaci
+
 Zbývá:
-- **Sken čárového kódu PSP při příjmu** – backend `lookupPsp()` hotový, UI ne
-- **„Co ještě mělo dnes přijet z této pobočky"** – seznam dalších strojů se
-  stejným kódem nakládky a datem svozu. Není ani v backendu.
-- **Kamera na DT66** – zbytečně běží a žere baterku, měla by být volitelná
+- **Fronta při výpadku signálu** – ve skladu je slabá wifi. Zatím se zápis
+  bez signálu nepovede a skladník ho musí zopakovat.
 - **Výkon** – `getSeznamKVydeje` čte celý list. Až bude pomalé, přidat
   `CacheService`, **ale invalidovat cache při každém zápisu**, jinak hrozí
   dvojí výdej.
-- **Příjem bez dokladu** – akce `PRIJEM_BEZ_DOKLADU` + notifikace logistikovi.
-  Automatický tisk PSP z Apps Scriptu **nejde** – maximum je odkaz na PDF
-  (sloupce W/X v `DATA`) nebo e-mail.
-- **Fronta při výpadku signálu** – ve skladu je slabá wifi.
+- **Reporty** – `report-presuny` (doba přesunu) a `report-pobocky`
+  (upozorňování poboček) jsou rozpracované jako návrhy. Druhý z nich stojí
+  na číselníku důvodů místo volné poznámky – bez něj je důvod známý
+  jen u pětiny případů.
 - **Přechod na O365.** Držet backend tenký a komunikaci přes pevný kontrakt
   (`lookup`, `lookupPsp`, `seznamKVydeji`, `save`, `ping`).
 
