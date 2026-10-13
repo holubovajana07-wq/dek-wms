@@ -1153,7 +1153,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '3.6';
+const VERZE_APP = '3.7';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -3116,26 +3116,53 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     });
   });
 
-  // Když novou verzi převezme, stránka se překreslí. Nikdy ale uprostřed
-  // práce – skladník by přišel o rozdělaný příjem. Počká se, až bude
-  // na skenovací nebo přihlašovací obrazovce.
-  let prenacteno = false;
-  navigator.serviceWorker.addEventListener('controllerchange', function () {
-    if (prenacteno) return;
-    prenacteno = true;
-
-    const vhodnaChvile = function () {
-      return el('screen-scan').classList.contains('active')
-          || el('screen-login').classList.contains('active');
-    };
-
-    const zkus = function () {
-      if (vhodnaChvile()) { location.reload(); return; }
-      setTimeout(zkus, 3000);
-    };
-    zkus();
-  });
+  navigator.serviceWorker.addEventListener('controllerchange', naplanujPrenacteni_);
 }
+
+// Přenačte stránku, ale nikdy uprostřed práce – skladník by přišel
+// o rozdělaný příjem. Počká se, až bude na skenovací nebo přihlašovací
+// obrazovce.
+let prenacteniNaplanovano = false;
+function naplanujPrenacteni_() {
+  if (prenacteniNaplanovano) return;
+  prenacteniNaplanovano = true;
+
+  const zkus = function () {
+    if (el('screen-scan').classList.contains('active')
+     || el('screen-login').classList.contains('active')) {
+      location.reload();
+      return;
+    }
+    setTimeout(zkus, 3000);
+  };
+  zkus();
+}
+
+// Porovná verzi, která běží, s tou na webu.
+//
+// Verze 3.5 vázala aktualizaci na změnu service workeru – jenže ten se
+// mění jen občas, a když se upraví pouze index.html, nic se nespustilo.
+// Přesně proto zůstala čtečka na 3.5, přestože 3.6 byla venku.
+// Tohle se dívá rovnou na číslo verze, takže je to jedno.
+async function zkontrolujVerzi_() {
+  if (!navigator.onLine) return;
+  try {
+    const r = await fetch('index.html?v=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/VERZE_APP\s*=\s*'([^']+)'/);
+    if (!m || m[1] === VERZE_APP) return;
+    console.log('[WMS] nová verze ' + m[1] + ', přenačtu se');
+    naplanujPrenacteni_();
+  } catch (e) { /* bez signálu se nic nekontroluje */ }
+}
+
+window.addEventListener('load', function () {
+  setTimeout(zkontrolujVerzi_, 5000);
+  setInterval(zkontrolujVerzi_, 15 * 60 * 1000);
+});
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden) setTimeout(zkontrolujVerzi_, 1500);
+});
 
 // ─────────────────────────────────────────────
 //  LASEROVÝ SKENER (HID) – Urovo DT66 a podobné
