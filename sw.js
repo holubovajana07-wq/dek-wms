@@ -11,7 +11,11 @@
 
 // Číslo verze zvyšte při každé změně seznamu souborů – stará mezipaměť
 // se tím zahodí a čtečky si stáhnou čistou.
-const CACHE = 'dek-wms-v4';
+// v5: zvýšeno schválně, aby se čtečky stojící na verzi 3.5 přenesly
+// na 3.7 samy. Starý mechanismus v 3.5 se spouštěl právě jen při změně
+// tohohle souboru – od 3.7 už se hlídá přímo číslo verze aplikace
+// a tenhle soubor se měnit nemusí.
+const CACHE = 'dek-wms-v5';
 
 const SOUBORY = [
   './',
