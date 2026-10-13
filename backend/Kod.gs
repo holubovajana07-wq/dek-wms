@@ -974,7 +974,8 @@ function ulozPohyb(record) {
       odpoved.mail = mail;
       odpoved.zprava = 'Přijato BEZ DOKLADU. '
         + (mail.odeslano
-            ? 'Upozornění odesláno na ' + mail.komu
+            ? ('Upozornění odesláno na ' + mail.komu
+               + (mail.chyby ? ' · NEDORUČENO: ' + mail.chyby : ''))
             : 'E-MAIL SE NEPODAŘILO ODESLAT: ' + mail.duvod);
     }
 
@@ -1468,15 +1469,21 @@ function prihlas(jmeno, pin) {
 
 const SLOZKA_PSP = 'V:\\CS\\DOPRAVA\\PSP_IMPORT\\02_ZPRACOVANO';
 
+// Vrátí adresy jako POLE. Oddělovač může být čárka, středník i nový řádek –
+// ať se při vkládání ze seznamu nemusí nic přepisovat.
 function getEmailPrijemce_() {
-  const komu = (PropertiesService.getScriptProperties()
+  const syrova = (PropertiesService.getScriptProperties()
     .getProperty('EMAIL_BEZ_DOKLADU') || '').trim();
-  return komu ? { komu: komu } : null;
+  if (!syrova) return [];
+
+  return syrova.split(/[,;\n]+/)
+    .map(function (a) { return a.trim(); })
+    .filter(function (a) { return a; });
 }
 
 function posliUpozorneniBezDokladu_(record, info, cas) {
-  const prijemce = getEmailPrijemce_();
-  if (!prijemce) {
+  const adresy = getEmailPrijemce_();
+  if (!adresy.length) {
     return { odeslano: false,
       duvod: 'Není nastavena vlastnost EMAIL_BEZ_DOKLADU ve Vlastnostech skriptu' };
   }
@@ -1508,15 +1515,31 @@ function posliUpozorneniBezDokladu_(record, info, cas) {
     + 'Doklad k vytištění:\n'
     + SLOZKA_PSP + '\\' + psp + '.pdf\n';
 
-  try {
-    MailApp.sendEmail(prijemce.komu, predmet, telo, { name: 'DEK WMS' });
-    return { odeslano: true, komu: prijemce.komu };
-  } catch (err) {
-    // Do protokolu, ať je selhání dohledatelné i zpětně – skladník
-    // hlášku na čtečce snadno přehlédne.
-    Logger.log('Mail "bez dokladu" NEODESLÁN na "' + prijemce.komu + '": ' + err.message);
-    return { odeslano: false, duvod: err.message };
+  // Každému zvlášť, ne jedním mailem na všechny.
+  // Jediná vadná adresa jinak shodí celé odeslání a neodejde nikomu nic.
+  // Takhle se nedoručí jen ta jedna a ostatní upozornění dostanou.
+  const ok = [], chyby = [];
+  adresy.forEach(function (komu) {
+    try {
+      MailApp.sendEmail(komu, predmet, telo, { name: 'DEK WMS' });
+      ok.push(komu);
+    } catch (err) {
+      chyby.push(komu + ' (' + err.message + ')');
+      // Do protokolu, ať je selhání dohledatelné i zpětně – skladník
+      // hlášku na čtečce snadno přehlédne.
+      Logger.log('Mail "bez dokladu" NEODESLÁN na "' + komu + '": ' + err.message);
+    }
+  });
+
+  if (!ok.length) {
+    return { odeslano: false, duvod: 'Neodešlo nikomu: ' + chyby.join(', ') };
   }
+  return {
+    odeslano: true,
+    komu: ok.join(', '),
+    // Když část selhala, ať to aplikace řekne – ne aby to vypadalo jako úspěch
+    chyby: chyby.length ? chyby.join(', ') : null,
+  };
 }
 
 // ============================================================
@@ -1655,13 +1678,27 @@ function kteraTabulka() {
 // Nastaví adresu, kam chodí upozornění "stroj bez dokladu".
 // Víc adres oddělte čárkou. Nemá to nic společného s listem
 // EMAIL_NASTAVENI – ten patří dispečerské automatizaci.
+// Nastaví adresy, kam chodí upozornění "stroj bez dokladu".
+//
+// Adresy se píšou SEM DO FUNKCE a uloží se do Vlastností skriptu.
+// Do repozitáře nepatří – je veřejný a byla by v něm jména a maily
+// kolegů. Apps Script projekt veřejný není, takže je tu bezpečně;
+// po spuštění ale vraťte zástupný text zpátky.
+//
+// Oddělovač je čárka, středník nebo nový řádek – jak se hodí.
 function nastavEmailBezDokladu() {
-  const ADRESA = 'SEM_VLOZTE_ADRESU';
-  if (ADRESA === 'SEM_VLOZTE_ADRESU') {
-    throw new Error('Nejdřív do funkce vložte e-mailovou adresu.');
+  const ADRESY = 'SEM_VLOZTE_ADRESY';
+  if (ADRESY === 'SEM_VLOZTE_ADRESY') {
+    throw new Error('Nejdřív do funkce vložte e-mailové adresy.');
   }
-  PropertiesService.getScriptProperties().setProperty('EMAIL_BEZ_DOKLADU', ADRESA);
-  Logger.log('Upozornění "bez dokladu" budou chodit na: ' + ADRESA);
+
+  PropertiesService.getScriptProperties().setProperty('EMAIL_BEZ_DOKLADU', ADRESY);
+
+  const seznam = getEmailPrijemce_();
+  Logger.log('Upozornění "bez dokladu" budou chodit na ' + seznam.length + ' adres:');
+  seznam.forEach(function (a) { Logger.log('  ' + a); });
+  Logger.log('');
+  Logger.log('Teď prosím vraťte do funkce zástupný text a uložte.');
 }
 
 // Řekne, na jakou adresu upozornění chodí a jestli jde vůbec odeslat.
@@ -1722,9 +1759,15 @@ function testEmailBezDokladu() {
     { pobNakladka: 'Blansko', pobVykladka: 'CS2' },
     new Date()
   );
-  Logger.log(vysledek.odeslano
-    ? 'Odesláno na ' + vysledek.komu
-    : 'NEODESLÁNO: ' + vysledek.duvod);
+  if (vysledek.odeslano) {
+    Logger.log('Odesláno na: ' + vysledek.komu);
+    if (vysledek.chyby) Logger.log('⚠ NEDORUČENO na: ' + vysledek.chyby);
+    Logger.log('');
+    Logger.log('Když mail nedorazí, hledejte ho ve spamu nebo karanténě –');
+    Logger.log('odesílatelem je soukromý Gmail a firemní filtry ho můžou odložit.');
+  } else {
+    Logger.log('NEODESLÁNO: ' + vysledek.duvod);
+  }
 }
 
 function nastavToken() {
