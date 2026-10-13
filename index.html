@@ -924,16 +924,14 @@
 
     <div class="manual-or">sem padá sken, nebo zadejte ručně</div>
 
-    <!-- Tohle pole je zároveň cílem skenu. Dřív na to bylo schované pole
-         mimo obrazovku, jenže androidí klávesnice (IME) se k neviditelnému
-         poli nepřipojí – sken neměl kam spadnout, dokud skladník neklepl
-         do řádku. Viditelné pole ten problém nemá a skladník navíc vidí,
-         co se naskenovalo.
-         inputmode="none" drží klávesnici schovanou; přepne se na "text"
-         teprve když do pole někdo opravdu klepne. -->
+    <!-- Tohle pole je zároveň cílem skenu.
+         POZOR: žádné inputmode="none". Čtečka vkládá text přes androidí
+         klávesnici (IME), a tím atributem se jí ta cesta zavře – pole je
+         zaměřené, sken proběhne, ale text nemá kudy dovnitř. Stálo to dva
+         pokusy (skryté pole i tohle), tak to sem prosím nevracet. -->
     <div style="display:flex;gap:8px;">
       <input class="form-input" id="inp-manual" placeholder="naskenujte nebo napište"
-             style="flex:1;" maxlength="40" inputmode="none"
+             style="flex:1;" maxlength="40"
              autocomplete="off" autocapitalize="characters" spellcheck="false">
       <button class="btn btn-secondary" style="width:auto;padding:0 16px;" onclick="manualConfirm()">→</button>
     </div>
@@ -1163,7 +1161,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.3';
+const VERZE_APP = '4.4';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -3278,9 +3276,6 @@ function zamerSken_() {
   if (!el('screen-scan').classList.contains('active')) return;
   const p = el('inp-manual');
   if (!p || document.activeElement === p) return;
-
-  // Klávesnice zůstane schovaná, dokud do pole někdo vědomě neklepne.
-  p.inputMode = 'none';
   try { p.focus({ preventScroll: true }); } catch (e) { p.focus(); }
 }
 
@@ -3290,12 +3285,6 @@ function zamerSken_() {
   let budik = null;
   let posledni = 0;
   let rychlych = 0;
-
-  // Klepnutí do pole = skladník chce psát. Teprve tehdy se pustí klávesnice.
-  p.addEventListener('pointerdown', function () {
-    p.inputMode = 'text';
-    setTimeout(function () { p.blur(); p.focus(); }, 0);
-  });
 
   function odesli_() {
     clearTimeout(budik);
