@@ -1136,6 +1136,14 @@
     <button class="btn btn-secondary" onclick="odhlasit()">Odhlásit se</button>
 
     <div class="divider"></div>
+
+    <!-- Nouzovka, když se aplikace sama nepřenese na novou verzi.
+         Nezávisí na service workeru ani na podmínkách přenačtení –
+         smaže uloženou kopii a načte stránku ze sítě. -->
+    <button class="btn btn-secondary" onclick="aktualizovatTed()">Zkontrolovat aktualizaci</button>
+    <div class="form-note" id="info-aktualizace" style="display:none;"></div>
+
+    <div class="divider"></div>
     <div style="text-align:center;">
       <div style="font-size:12px;color:var(--text-dim);" id="info-verze">DEK WMS – pilotní provoz CS2</div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Data se ukládají do Google Sheets</div>
@@ -1155,7 +1163,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.1';
+const VERZE_APP = '4.2';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -3167,6 +3175,38 @@ function naplanujPrenacteni_() {
     setTimeout(zkus, 3000);
   };
   zkus();
+}
+
+// Ruční aktualizace z Nastavení. Nespoléhá na nic z toho, co níž –
+// zahodí uloženou kopii aplikace a načte ji ze sítě. Přihlášení
+// ani uložené seznamy se nemažou.
+async function aktualizovatTed() {
+  const info = el('info-aktualizace');
+  info.style.display = 'block';
+  info.textContent = 'Hledám novou verzi…';
+
+  try {
+    const r = await fetch('index.html?v=' + Date.now(), { cache: 'no-store' });
+    const m = r.ok ? (await r.text()).match(/VERZE_APP\s*=\s*'([^']+)'/) : null;
+    const naWebu = m ? m[1] : null;
+
+    if (naWebu && naWebu === VERZE_APP) {
+      info.textContent = 'Máte nejnovější verzi (v' + VERZE_APP + ').';
+      return;
+    }
+
+    info.textContent = naWebu
+      ? 'Stahuju v' + naWebu + '…'
+      : 'Stahuju novou verzi…';
+
+    if (window.caches) {
+      const klice = await caches.keys();
+      for (const k of klice) await caches.delete(k);
+    }
+    location.reload();
+  } catch (e) {
+    info.textContent = 'Nepodařilo se spojit se sítí. Zkuste to znovu, až bude signál.';
+  }
 }
 
 // Porovná verzi, která běží, s tou na webu.
