@@ -15,10 +15,22 @@ PSP v Google Sheets.
 ## Architektura
 
 ```
-index.html (GitHub Pages)  ──JSONP/GET──>  Apps Script  ──>  Google Sheets
-   čtečka ve skladu                        "WMS backend"        list "DATA"
-                                           backend/Kod.gs       list "POHYBY"
+index.html (GitHub Pages)  ──fetch/GET──>  Apps Script  ──>  Google Sheets
+   čtečka ve skladu                        "WMS backend"        DATA · POHYBY
+                                           backend/Kod.gs       UZIVATELE · LOKACE
 ```
+
+**Soubory v repozitáři:**
+
+| Soubor | K čemu |
+|---|---|
+| `index.html` | Celá aplikace. Jeden soubor, žádný build krok. |
+| `konfigurace.js` | Adresa skriptu (`WMS_URL`) + záložní lokace (`WMS_LOKACE`) |
+| `sw.js` | Ukládání do čtečky, aby aplikace naběhla i bez signálu |
+| `backend/Kod.gs` | Apps Script. Kopíruje se do projektu ručně. |
+| `diagnostika.html` | Kontrola čtečky, test skeneru, vyčištění aplikace |
+| `instalace.html` | Tisknutelný list: QR s adresou + nastavení skeneru |
+| `qr-test.html` | Testovací QR kódy strojů a čárové kódy dokladů |
 
 - Apps Script WMS je **vlastní samostatný projekt** jménem `WMS backend`,
   založený od nuly na script.google.com. Není připojený k žádné tabulce –
@@ -123,14 +135,68 @@ Rozchození stálo den hledání (13. 10. 2026), takže pro příště:
 > **nespouští sama** – je za tlačítkem a po skenu se vypne. Nikdy to nevracet
 > na automatické spouštění.
 
-> ⚠️ **„Automatic Text Mode" nevkládá stisky kláves, ale text přes IME.**
-> Globální `keydown` listener takový sken nevidí. Aplikace proto drží zaměřené
-> neviditelné pole (`#sken-zachyt`) a čte `input`. Obě cesty zůstávají vedle sebe.
-
 > ⚠️ **Android pouští `focus()` hlavně během doteku.** Zaměření se proto nastavuje
 > synchronně v obsluze doteku (přepnutí na příjem, tlačítko Zpět, dotek kamkoliv
 > na obrazovce příjmu), ne přes `setTimeout`. Jinak skladník musí nejdřív klepnout
 > do pole, aby měl sken kam spadnout.
+
+## Jak se zpracovává sken
+
+Rozchození trvalo několik pokusů a každý selhal z jiného důvodu. Výsledný stav
+je schválně co nejjednodušší – **jedna cesta, žádné souběžné odchytávání.**
+
+Na **obrazovce příjmu** je cílem skenu **viditelné pole ručního zadání**
+(`#inp-manual`). Je zaměřené hned po přechodu na příjem, sken do něj spadne
+a skladník navíc vidí, co se načetlo.
+
+> ⚠️ **Tomu poli nikdy nedávat `inputmode="none"`.** Vypadá to lákavě (schová
+> klávesnici), ale čtečka vkládá text právě přes klávesnici (IME) – tím atributem
+> se jí cesta zavře. Pole je zaměřené, sken proběhne a text nedorazí. Shodilo to
+> dva pokusy po sobě, než se na to přišlo.
+
+> ⚠️ **Schované pole mimo obrazovku nefunguje** ze stejného důvodu: androidí IME
+> se k neviditelnému poli nepřipojí.
+
+Co se s textem stane (`zpracujZadani_`, jediný vstupní bod):
+
+| Vstup | Výsledek |
+|---|---|
+| Samé číslice, 3+ | Konec čísla dokladu → dohledá se v indexu. Víc shod = nabídne se výběr, nikdy se netipuje. |
+| `PSP-…` | Doklad, celý naráz |
+| Cokoliv jiného | ID stroje |
+
+Odesílá se **Enterem, šipkou, nebo samo po 250 ms**, když text přibýval rychleji,
+než stihne člověk psát (pojistka pro čtečky, které Enter neposílají). Ručně psané
+číslo se samo neodešle, aby nic neodletělo dřív, než to skladník dopíše.
+
+Globální odchytávání znaků (`hidOdesli_`) zůstává **jen pro potvrzovací obrazovku**,
+kde žádné pole není a skladník míří rovnou na další stroj. Na obrazovce příjmu je
+vypnuté – dřív běželo vedle pole, obě cesty si text braly a vyprazdňovaly,
+a sken končil hláškou „Zadejte ID stroje".
+
+## Aktualizace aplikace
+
+**Nasazení = Commit + Push. Na čtečky se nechodí.**
+
+Aplikace porovnává `VERZE_APP` se souborem na webu – při startu, po 15 minutách
+a po návratu z pozadí. Když se liší, přenačte se.
+
+> ⚠️ Přenačtení se odkládá **jen** na obrazovce potvrzení příjmu a výběru PSP
+> k výdeji, kde má skladník rozdělanou práci. Nikde jinde. Dřív to bylo obráceně
+> (přenačítat jen na skenovací obrazovce) a kdo si otevřel Nastavení, aby
+> zkontroloval verzi, čekal marně.
+
+> ⚠️ **Nevázat aktualizaci na změnu `sw.js`.** Verze 3.5 to tak měla a když se
+> upravil jen `index.html`, nespustilo se nic.
+
+Záchranné cesty, když by selhala i tahle:
+
+1. **Nastavení → Zkontrolovat aktualizaci** – zahodí uloženou kopii a načte ze sítě
+2. **`diagnostika.html` → Vyčistit aplikaci** – navíc odregistruje service worker
+
+Čerstvá instalace si vždycky stáhne nejnovější verzi, tam není co řešit.
+**Při každé změně zvýšit `VERZE_APP`** – je to jediné, podle čeho čtečky poznají,
+že mají něco stáhnout.
 
 **Čárový kód na dokladu obsahuje číslo PSP** (Code 128, ověřeno skenem
 13. 10. 2026). Nadpis „Příkaz k jízdě" nad ním je jen popisek formuláře.
@@ -174,6 +240,11 @@ délka úseku, ne počet buněk. Ověřuje `porovnejOknoZapisu()`.
 4. **Při redeployi Apps Scriptu zachovat stejnou URL.** Čtečky ji mají uloženou
    v `localStorage`; nové nasazení = nová adresa = nefunkční čtečky.
 5. **Nezakládat nic v tabulce naslepo** – vždy nejdřív `zmapujData()`.
+6. **Nenechávat vedle sebe dvě řešení téhož.** Sken odchytávaly chvíli dvě cesty
+   naráz a braly si navzájem text; aktualizace se kontrolovala dvěma způsoby,
+   z nichž jeden nefungoval. Když přibude nová cesta, tu starou odstranit.
+7. **Při každé změně frontendu zvýšit `VERZE_APP`.** Podle ní čtečky poznají,
+   že mají stahovat, a podle ní se v provozu pozná, co na které čtečce běží.
 
 ## Stav (září 2026)
 
@@ -218,20 +289,24 @@ tím trvá desítky hodin na jednoho skladníka. Nikdy tu pauzu neodstraňovat �
 je čtyřmístný PIN prolomený za pár minut.
 
 Ostrý provoz od 1. 10. 2026 (`SHEET_ID` → `1BKvJXEU…`, ověřuje `kteraTabulka()`).
+Aplikace je ve verzi **4.4** (13. 10. 2026), sken na čtečkách ověřen v provozu.
 
 Hotovo od října:
 - **Sken dokladu i stroje** funguje na čtečce včetně laseru – viz Zařízení
+  a Jak se zpracovává sken
 - **Doklad jde zadat koncem čísla** (`122` místo celého PSP); při víc shodách
   se nabídne výběr, nikdy se netipuje
+- **Kamera je volitelná** – za tlačítkem, po skenu se vypne. Nesmí běžet sama,
+  brala by hardware laseru.
 - **Lokace řídí list `LOKACE`** – zapnutí/vypnutí + obsazenost počítaná
   z `POHYBY`. Jedou do čtečky s indexem, takže změna je všude do minuty.
   Přepočet: `prepocitejLokace()`, ideálně časovou spouští po hodině.
-- **Aplikace se aktualizuje sama** – porovnává `VERZE_APP` se souborem na webu
-  při startu, po 15 minutách a po návratu z pozadí; přenačte se až na skenovací
-  nebo přihlašovací obrazovce, aby nikdo nepřišel o rozdělaný příjem.
-  **Po nasazení tedy stačí push, na čtečky se nechodí.**
+- **Aplikace se aktualizuje sama** – viz Aktualizace aplikace
 - **`diagnostika.html`** – projde síť, konfiguraci, verzi, ping, seznam
-  skladníků, instalaci, paměť i skener; umí vyčistit nainstalovanou aplikaci
+  skladníků, instalaci, paměť i skener; má test skeneru, který vypíše přesně
+  to, co čtečka poslala, a umí vyčistit nainstalovanou aplikaci
+- **`instalace.html`** – tisknutelný list pro nasazení nové čtečky:
+  QR s adresou, postup instalace a tabulka nastavení skeneru
 
 Zbývá:
 - **Fronta při výpadku signálu** – ve skladu je slabá wifi. Zatím se zápis
