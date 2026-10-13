@@ -1157,7 +1157,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '3.8';
+const VERZE_APP = '3.9';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -1565,7 +1565,13 @@ function showTab(name) {
   if (tab && el('tab-' + tab)) el('tab-' + tab).classList.add('active');
 
   // Kamera se zapíná až tlačítkem – viz poznámka u scanner-box.
-  if (name === 'scan') setTimeout(zamerSken_, 100);
+  if (name === 'scan') {
+    // Zaměřit HNED, ještě uvnitř doteku, kterým skladník přepnul na příjem.
+    // Android zaměření pole mimo dotek většinou ignoruje – proto dřív
+    // musel nejdřív klepnout do řádku, aby měl sken kam spadnout.
+    zamerSken_();
+    setTimeout(zamerSken_, 150);
+  }
   else vypniKameru();
 
   if (name === 'settings') {
@@ -2175,6 +2181,7 @@ function skryjVarovani() {
 
 function goBack() {
   showTab('scan');
+  zamerSken_();          // ještě v doteku tlačítka Zpět
   state.currentId = null;
   state.currentPsp = null;
   state.currentLokace = null;
@@ -3265,6 +3272,18 @@ function zamerSken_() {
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) setTimeout(zamerSken_, 300);
   });
+
+  // Jakýkoliv dotek kdekoliv na obrazovce příjmu zaměření vrátí.
+  // Android pouští focus hlavně během doteku, takže tohle je ta
+  // nejspolehlivější chvíle – a skladník kvůli tomu nemusí mířit
+  // do konkrétního řádku, stačí ťuknout kamkoliv.
+  document.addEventListener('pointerdown', function (e) {
+    if (!el('screen-scan').classList.contains('active')) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+              || t.tagName === 'SELECT' || t.tagName === 'BUTTON')) return;
+    setTimeout(zamerSken_, 0);
+  }, true);
 })();
 
 document.addEventListener('keydown', e => {
