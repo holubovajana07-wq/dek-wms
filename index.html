@@ -1163,7 +1163,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.2';
+const VERZE_APP = '4.3';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -1856,10 +1856,18 @@ function vyberPsp(psp) {
   showConfirmScreenPsp(psp);
 }
 
+// Tlačítko „→" vedle pole. Prázdné pole ohlásí, protože to je vědomé
+// klepnutí uživatele – u skenu se naopak nesmí ozvat nic.
 function manualConfirm() {
   const val = el('inp-manual').value.trim().toUpperCase();
   if (!val) { showToast('Zadejte ID stroje nebo číslo PSP', 'error'); return; }
   el('inp-manual').value = '';
+  zpracujZadani_(val);
+}
+
+// Jediné místo, kudy prochází všechno zadané i naskenované.
+function zpracujZadani_(val) {
+  if (!val) return;
   el('psp-vyber').style.display = 'none';
 
   // Samé číslice a není to čtyřznakové ID stroje → bere se to jako konec
@@ -3244,22 +3252,18 @@ document.addEventListener('visibilitychange', function () {
 // proto se buffer po 300 ms nečinnosti zahodí.
 let hidBuffer = '';
 let hidTimer  = null;
-let hidPosledni = 0;     // kdy přišel předchozí znak
-let hidRychlych = 0;     // kolik znaků přišlo rychleji, než stihne člověk
 
 // Odeslat, co se nasbíralo. Volá se při Enteru i po chvilce ticha.
 function hidOdesli_() {
   clearTimeout(hidTimer);
   const nacteno = hidBuffer;
   hidBuffer = '';
-  hidRychlych = 0;
   if (nacteno.length < 3) return;
 
-  // Sken se bere i na potvrzovací obrazovce – skladník často skenuje
-  // další stroj, aniž by se vracel zpátky.
-  const naSkenu   = el('screen-scan').classList.contains('active');
-  const naPotvrzeni = el('screen-confirm').classList.contains('active');
-  if (!naSkenu && !naPotvrzeni) return;
+  // Sken se bere na potvrzovací obrazovce – skladník často míří rovnou
+  // na další stroj, aniž by se vracel zpátky. Obrazovku příjmu obsluhuje
+  // zaměřené pole, sem se tedy vůbec nedostane.
+  if (!el('screen-confirm').classList.contains('active')) return;
   if (!state.currentAction) state.currentAction = 'prijem';
 
   handleScan(nacteno);
@@ -3293,33 +3297,39 @@ function zamerSken_() {
     setTimeout(function () { p.blur(); p.focus(); }, 0);
   });
 
+  function odesli_() {
+    clearTimeout(budik);
+    rychlych = 0;
+    const text = p.value.trim().toUpperCase();
+    p.value = '';
+    zpracujZadani_(text);
+  }
+
   p.addEventListener('input', function () {
     const ted = Date.now();
     if (ted - posledni < 50) rychlych++; else rychlych = 0;
     posledni = ted;
 
     clearTimeout(budik);
-    const text = p.value.trim();
-    if (text.length < 3) return;
+    if (p.value.trim().length < 3) return;
 
     // Odešle se samo jen když text přibýval rychleji, než stihne člověk –
-    // tedy u skenu. Ručně psané číslo se potvrdí Enterem nebo šipkou,
+    // tedy u skenu. Ručně psané číslo počká na Enter nebo na šipku,
     // ať se nic neodešle dřív, než to skladník dopíše.
+    //
+    // Pojistka pro čtečky bez Enteru: kdyby suffix nedorazil, odejde to
+    // po 250 ms samo. Když Enter přijde dřív, časovač se zruší.
     if (rychlych < 3) return;
-    budik = setTimeout(function () {
-      p.value = '';
-      rychlych = 0;
-      handleScan(text);
-    }, 120);
+    budik = setTimeout(odesli_, 250);
   });
 
-  // Enter obsluhuje manualConfirm – pozná ID stroje, celé PSP i konec čísla.
+  // Enter: hodnotu si bereme rovnou tady a hned ji vyprázdníme.
+  // Dřív se volal manualConfirm, který si ji četl z pole znovu – a když
+  // ho mezitím stihla vyprázdnit jiná cesta, zahlásil „Zadejte ID stroje".
   p.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    clearTimeout(budik);
-    rychlych = 0;
-    manualConfirm();
+    odesli_();
   });
 
   // Zaměření se ztrácí při klepnutí jinam, po návratu z pozadí i samo
@@ -3354,29 +3364,22 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  const ted = Date.now();
-  const mezera = ted - hidPosledni;
-  hidPosledni = ted;
-
-  // Člověk neťuká rychleji než zhruba 50 ms na znak, skener ano.
-  // Podle toho se pozná sken i tehdy, když je kurzor v nějakém poli –
-  // dřív se v takovém případě celý sken zahodil.
-  if (e.key.length === 1 && mezera < 50) hidRychlych++;
+  // Sken na obrazovce příjmu obsluhuje VÝHRADNĚ zaměřené pole výš.
+  // Tenhle globální sběr tu zůstával vedle něj a bral si stejné znaky –
+  // obě cesty si pak navzájem vyprazdňovaly text a sken skončil hláškou
+  // „Zadejte ID stroje". Jedna cesta stačí.
+  if (el('screen-scan').classList.contains('active')) return;
 
   const tag = (document.activeElement && document.activeElement.tagName) || '';
-  const vPoli = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
-  // V poli necháváme psát, dokud to nevypadá na sken.
-  if (vPoli && hidRychlych < 3) { hidBuffer = ''; return; }
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+  // Na ostatních obrazovkách (typicky potvrzení příjmu) se sken pořád
+  // hodí – skladník rovnou míří na další stroj.
   if (e.key === 'Enter') { hidOdesli_(); return; }
 
   if (e.key.length === 1) {
     hidBuffer += e.key;
     clearTimeout(hidTimer);
-    // ZÁSADNÍ: odesílá se i bez Enteru. Spousta čteček ho z výroby
-    // neposílá a dřív se v takovém případě buffer jen zahodil –
-    // laser „nefungoval", přestože kód načetl správně.
-    // 500 ms ticha je bezpečně víc, než je mezera mezi znaky skenu.
     hidTimer = setTimeout(hidOdesli_, 500);
   }
 });
