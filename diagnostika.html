@@ -51,6 +51,19 @@
 
 <div id="vysledky"></div>
 
+<h1 style="margin-top:26px;">Test skeneru</h1>
+<div class="podnadpis">
+  Klepněte do pole a zmáčkněte spoušť. Vypíše se přesně to, co skener poslal —
+  aplikace do toho nijak nezasahuje.
+</div>
+
+<input id="sken-pole" placeholder="sem klepnout a naskenovat"
+       autocomplete="off" autocapitalize="off" spellcheck="false"
+       style="width:100%;font:inherit;padding:14px;border-radius:10px;
+              border:1.5px solid #2a3244;background:#1b2130;color:#eef1f6;">
+
+<div id="sken-vysledek" style="margin-top:10px;"></div>
+
 <div class="tlacitka">
   <button class="hlavni" onclick="location.reload()">Spustit znovu</button>
   <button class="vedlejsi" onclick="vycistit()">Vyčistit aplikaci a stáhnout znovu</button>
@@ -192,6 +205,51 @@ function cas() { return new Date().toLocaleTimeString('cs-CZ'); }
   konec.style.marginTop = '16px';
   konec.textContent = 'Kontrola proběhla ' + cas() + '.';
   box.appendChild(konec);
+})();
+
+// ── Test skeneru ──────────────────────────────────────────────
+// Skener se chová jako klávesnice. Tohle jen posbírá, co napsal,
+// a vypíše to i s délkou a kódy znaků – podle toho se pozná,
+// jestli vůbec něco posílá a jestli na konci přidává Enter.
+(function testSkeneru() {
+  var pole = document.getElementById('sken-pole');
+  var vysl = document.getElementById('sken-vysledek');
+  var pocet = 0;
+  var mělEnter = false;
+
+  pole.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { mělEnter = true; e.preventDefault(); vypis(); }
+  });
+
+  pole.addEventListener('input', function () {
+    clearTimeout(pole._budik);
+    pole._budik = setTimeout(vypis, 400);
+  });
+
+  function vypis() {
+    var t = pole.value;
+    if (!t) return;
+    pocet++;
+
+    var kody = t.split('').slice(0, 24).map(function (z) {
+      return z + '=' + z.charCodeAt(0);
+    }).join('  ');
+
+    var d = document.createElement('div');
+    d.className = 'radek ok';
+    d.innerHTML = '<div class="znak">⌁</div><div class="telo">'
+      + '<div class="nazev"></div>'
+      + '<div class="detail"></div></div>';
+    d.querySelector('.nazev').textContent = t;
+    d.querySelector('.detail').textContent =
+      t.length + ' znaků · ' + (mělEnter ? 'Enter na konci ANO' : 'Enter na konci NE')
+      + '\n' + kody;
+    d.querySelector('.detail').style.whiteSpace = 'pre-wrap';
+    vysl.insertBefore(d, vysl.firstChild);
+
+    pole.value = '';
+    mělEnter = false;
+  }
 })();
 
 async function vycistit() {

@@ -1440,13 +1440,26 @@ async function prihlasit() {
   const btn = el('klavesa-ok');
   btn.textContent = '…';
 
+  // Přihlášení je jediné místo, kde skladník čeká na server a nic nevidí.
+  // Tak ať aspoň ví, že se něco děje a kdy to začíná být nenormální.
+  zobrazChybuLoginu('Ověřuji PIN…');
+  const pomalu = setTimeout(function () {
+    zobrazChybuLoginu('Spojení je pomalé, ještě to zkouším…');
+  }, 4000);
+  state.naPomaluZprava = function () {
+    zobrazChybuLoginu('První cesta neodpověděla, zkouším záložní…');
+  };
+
   const odpoved = (state.config.demoMode || !state.config.scriptUrl)
     ? { ok: true, jmeno: jmeno }
-    : await jsonp({ action: 'prihlaseni', jmeno: jmeno, pin: state.pin });
+    : await jsonp({ action: 'prihlaseni', jmeno: jmeno, pin: state.pin }, LIMIT_LEHKY);
 
+  clearTimeout(pomalu);
+  state.naPomaluZprava = null;
   btn.textContent = 'OK';
   state.pin = '';
   vykresliPin();
+  el('login-chyba').style.display = 'none';
 
   if (!odpoved || !odpoved.ok) {
     zobrazChybuLoginu((odpoved && (odpoved.chyba || odpoved.zprava)) || 'Přihlášení se nezdařilo');
@@ -1590,6 +1603,7 @@ async function startScanner() {
 
     state.scanning = true;
     state.stream = stream;
+    state.skenOd = Date.now();   // od kdy se míří – řídí tempo snímkování
 
     el('scan-hint').textContent = state.currentAction
       ? 'Namiřte kameru na QR kód stroje'
@@ -1637,8 +1651,15 @@ function scanLoop() {
     }
   }
 
-  // 5 snímků za sekundu místo 60 – 10x méně zatížení CPU
-  setTimeout(scanLoop, 200);
+  // Tempo snímkování. Původních 5 snímků za sekundu šetřilo baterku,
+  // ale skladník s kódem před kamerou čekal – mezi pokusy byla pětina
+  // sekundy a trefa přišla až za několik pokusů.
+  //
+  // Prvních 15 sekund po otevření se proto skenuje svižně (12×/s), což je
+  // doba, kdy skladník opravdu míří. Pak se tempo samo zvolní, aby ležící
+  // čtečka s otevřenou kamerou nevybíjela baterii.
+  const odStartu = Date.now() - (state.skenOd || 0);
+  setTimeout(scanLoop, odStartu < 15000 ? 80 : 300);
 }
 
 function stopScanner() {
@@ -2195,12 +2216,21 @@ async function fetchJednou_(params, timeoutMs) {
   }
 }
 
+// Limit pro drobné dotazy: přihlášení, seznam jmen, ping, index.
+// Těch 45 sekund dole je dimenzovaných na ZÁPIS, kde se opravdu vyplatí
+// čekat. U přihlášení to znamenalo, že při zaseknutém spojení skladník
+// čekal 45 s na první cestu a dalších 45 na záložní – skoro dvě minuty
+// u tlačítka OK. Dvanáct sekund stačí i na probuzení skriptu.
+const LIMIT_LEHKY = 12000;
+
 // Zkusí fetch, a kdyby přece jen selhal, sáhne po staré cestě přes JSONP.
 async function jsonp(params, timeoutMs) {
   const prvni = await fetchJednou_(params, timeoutMs);
   if (!prvni.spojeniSelhalo) return prvni;
 
   console.warn('[WMS] ' + (params.action || '?') + ' – fetch selhal, zkouším JSONP');
+  // Ať skladník neví, proč to stojí – při přechodu na záložní cestu to řekneme.
+  if (typeof state !== 'undefined' && state.naPomaluZprava) state.naPomaluZprava();
   const zaloha = await jsonpJednou_(params, timeoutMs);
   if (!zaloha.spojeniSelhalo) return zaloha;
 
