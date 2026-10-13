@@ -3100,6 +3100,26 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
 // proto se buffer po 300 ms nečinnosti zahodí.
 let hidBuffer = '';
 let hidTimer  = null;
+let hidPosledni = 0;     // kdy přišel předchozí znak
+let hidRychlych = 0;     // kolik znaků přišlo rychleji, než stihne člověk
+
+// Odeslat, co se nasbíralo. Volá se při Enteru i po chvilce ticha.
+function hidOdesli_() {
+  clearTimeout(hidTimer);
+  const nacteno = hidBuffer;
+  hidBuffer = '';
+  hidRychlych = 0;
+  if (nacteno.length < 3) return;
+
+  // Sken se bere i na potvrzovací obrazovce – skladník často skenuje
+  // další stroj, aniž by se vracel zpátky.
+  const naSkenu   = el('screen-scan').classList.contains('active');
+  const naPotvrzeni = el('screen-confirm').classList.contains('active');
+  if (!naSkenu && !naPotvrzeni) return;
+  if (!state.currentAction) state.currentAction = 'prijem';
+
+  handleScan(nacteno);
+}
 
 document.addEventListener('keydown', e => {
   // Na přihlašovací obrazovce obsluhuje klávesnice PIN – ať jde zadat
@@ -3111,26 +3131,30 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  // Když uživatel píše do pole, nech ho psát
-  const tag = (document.activeElement && document.activeElement.tagName) || '';
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const ted = Date.now();
+  const mezera = ted - hidPosledni;
+  hidPosledni = ted;
 
-  if (e.key === 'Enter') {
-    if (hidBuffer.length >= 3) {
-      const nacteno = hidBuffer;
-      hidBuffer = '';
-      clearTimeout(hidTimer);
-      if (el('screen-scan').classList.contains('active')) {
-        handleScan(nacteno);
-      }
-    }
-    return;
-  }
+  // Člověk neťuká rychleji než zhruba 50 ms na znak, skener ano.
+  // Podle toho se pozná sken i tehdy, když je kurzor v nějakém poli –
+  // dřív se v takovém případě celý sken zahodil.
+  if (e.key.length === 1 && mezera < 50) hidRychlych++;
+
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  const vPoli = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+  // V poli necháváme psát, dokud to nevypadá na sken.
+  if (vPoli && hidRychlych < 3) { hidBuffer = ''; return; }
+
+  if (e.key === 'Enter') { hidOdesli_(); return; }
 
   if (e.key.length === 1) {
     hidBuffer += e.key;
     clearTimeout(hidTimer);
-    hidTimer = setTimeout(() => { hidBuffer = ''; }, 300);
+    // ZÁSADNÍ: odesílá se i bez Enteru. Spousta čteček ho z výroby
+    // neposílá a dřív se v takovém případě buffer jen zahodil –
+    // laser „nefungoval", přestože kód načetl správně.
+    // 500 ms ticha je bezpečně víc, než je mezera mezi znaky skenu.
+    hidTimer = setTimeout(hidOdesli_, 500);
   }
 });
 </script>
