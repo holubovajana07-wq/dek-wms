@@ -90,21 +90,50 @@
   <li>Přihlásit se jménem a <strong>čtyřmístným PINem</strong>. Přihlášení platí 12 hodin.</li>
 </ol>
 
+<div class="sekce-nadpis">Nastavení skeneru — udělat na každé čtečce</div>
+<div class="podnadpis">
+  Otevřít aplikaci <strong>ScanSettings</strong> na čtečce. Bez prvního řádku
+  skener v aplikaci nefunguje, i když laser svítí.
+</div>
+<table>
+  <tr><th>Kde</th><th>Nastavit na</th></tr>
+  <tr>
+    <td>Output mode → <strong>Output Mode</strong></td>
+    <td><strong>Keyboard output</strong><br>
+        <span style="color:#777;">Z výroby bývá <em>Intent output</em> — ten aplikace nevidí.
+        Tohle je ta nejdůležitější volba.</span></td>
+  </tr>
+  <tr>
+    <td>Output mode → Action key character</td>
+    <td>Enter Key</td>
+  </tr>
+  <tr>
+    <td>Output mode → Sounds</td>
+    <td>zapnout<br><span style="color:#777;">Bez pípnutí skladník nepozná, že sken prošel.</span></td>
+  </tr>
+  <tr>
+    <td>Scanner Input → Enable</td>
+    <td>zapnuto</td>
+  </tr>
+</table>
+
 <div class="poznamka">
-  <strong>Když se po skenu nic nevypíše</strong>
-  Skener nejspíš neposílá Enter nebo nemá zapnutý typ kódu. Nastavuje se to v aplikaci
-  skeneru na čtečce: <em>Scanner Settings → Suffix → Enter</em> a
-  <em>Scanner Settings → Symbologies → Code 128</em>. Totéž potřebuje aplikace
-  pro skenování dokladů, takže se to vyplatí nastavit rovnou.
+  <strong>Zkouška</strong>
+  Po nastavení otevřít aplikaci, klepnout na <strong>PŘÍJEM</strong> a rovnou zmáčknout spoušť.
+  Do ničeho se neklepá — pole na sken čeká samo. Stroj se musí zobrazit.
+  <br><br>
+  Když laser svítí, ale v aplikaci se nic nestane, je to skoro vždycky ten
+  <em>Output Mode</em> v prvním řádku tabulky.
 </div>
 
 <div class="sekce-nadpis">Co se na čtečce nastavuje</div>
 <table>
   <tr><th>Co</th><th>Kde</th></tr>
   <tr><td>Adresa aplikace</td><td>Nikde — je součástí aplikace</td></tr>
+  <tr><td>Lokace ve skladu</td><td>Nikde — berou se z tabulky</td></tr>
   <tr><td>Jméno a PIN</td><td>Při prvním spuštění, pak jednou za 12 hodin</td></tr>
-  <tr><td>Aktualizace</td><td>Stahují se samy při každém spuštění</td></tr>
-  <tr><td>Skener</td><td>Suffix = Enter, zapnutý Code 128</td></tr>
+  <tr><td>Aktualizace</td><td>Stahují se samy</td></tr>
+  <tr><td>Skener</td><td>Podle tabulky výše — jediné, co se opravdu nastavuje</td></tr>
 </table>
 
 <div class="poznamka">
