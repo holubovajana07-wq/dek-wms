@@ -1512,6 +1512,9 @@ function posliUpozorneniBezDokladu_(record, info, cas) {
     MailApp.sendEmail(prijemce.komu, predmet, telo, { name: 'DEK WMS' });
     return { odeslano: true, komu: prijemce.komu };
   } catch (err) {
+    // Do protokolu, ať je selhání dohledatelné i zpětně – skladník
+    // hlášku na čtečce snadno přehlédne.
+    Logger.log('Mail "bez dokladu" NEODESLÁN na "' + prijemce.komu + '": ' + err.message);
     return { odeslano: false, duvod: err.message };
   }
 }
@@ -1659,6 +1662,56 @@ function nastavEmailBezDokladu() {
   }
   PropertiesService.getScriptProperties().setProperty('EMAIL_BEZ_DOKLADU', ADRESA);
   Logger.log('Upozornění "bez dokladu" budou chodit na: ' + ADRESA);
+}
+
+// Řekne, na jakou adresu upozornění chodí a jestli jde vůbec odeslat.
+// Spusťte, když maily přestanou chodit – nic neodesílá.
+function zkontrolujEmail() {
+  const syrova = PropertiesService.getScriptProperties()
+    .getProperty('EMAIL_BEZ_DOKLADU');
+
+  Logger.log('--- Vlastnost EMAIL_BEZ_DOKLADU ---');
+  if (syrova === null) {
+    Logger.log('⚠ NENÍ NASTAVENA. Upozornění nemají kam chodit.');
+    Logger.log('  Nastavení projektu → Vlastnosti skriptu → přidat EMAIL_BEZ_DOKLADU');
+    return;
+  }
+
+  Logger.log('  hodnota: "' + syrova + '"');
+  Logger.log('  délka: ' + syrova.length + ' znaků');
+
+  const adresy = syrova.split(',').map(function (a) { return a.trim(); })
+    .filter(function (a) { return a; });
+
+  if (!adresy.length) {
+    Logger.log('⚠ Vlastnost existuje, ale je prázdná.');
+    return;
+  }
+
+  Logger.log('');
+  Logger.log('--- Adresy (' + adresy.length + ') ---');
+  let chyb = 0;
+  adresy.forEach(function (a) {
+    const ok = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(a);
+    if (!ok) chyb++;
+    Logger.log('  ' + (ok ? '✓' : '⚠ VYPADÁ ŠPATNĚ:') + ' ' + a);
+  });
+
+  if (chyb) {
+    Logger.log('');
+    Logger.log('Jediná vadná adresa shodí celé odeslání – Gmail odmítne celý mail.');
+    Logger.log('Časté příčiny: středník místo čárky, mezera uvnitř adresy, překlep v doméně.');
+  }
+
+  Logger.log('');
+  Logger.log('--- Odesílání ---');
+  try {
+    Logger.log('  zbývá dnes odeslat: ' + MailApp.getRemainingDailyQuota() + ' mailů');
+  } catch (e) {
+    Logger.log('  ⚠ nepodařilo se zjistit limit: ' + e.message);
+  }
+  Logger.log('');
+  Logger.log('Když je všechno ✓, pošlete zkušební mail funkcí testEmailBezDokladu().');
 }
 
 // Pošle zkušební upozornění, ať je vidět, jak mail vypadá
