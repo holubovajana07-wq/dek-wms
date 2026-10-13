@@ -1155,7 +1155,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.0';
+const VERZE_APP = '4.1';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -3153,12 +3153,17 @@ function naplanujPrenacteni_() {
   if (prenacteniNaplanovano) return;
   prenacteniNaplanovano = true;
 
+  // Čeká se JEN na obrazovkách, kde má skladník rozdělanou práci.
+  // Dřív to bylo obráceně – přenačítalo se jen na skenovací a přihlašovací
+  // obrazovce – takže kdo si otevřel Nastavení (třeba aby zkontroloval
+  // verzi), čekal marně a aplikace se neaktualizovala vůbec.
+  const rozdelanaPrace = function () {
+    return el('screen-confirm').classList.contains('active')
+        || el('screen-vydej-psp').classList.contains('active');
+  };
+
   const zkus = function () {
-    if (el('screen-scan').classList.contains('active')
-     || el('screen-login').classList.contains('active')) {
-      location.reload();
-      return;
-    }
+    if (!rozdelanaPrace()) { location.reload(); return; }
     setTimeout(zkus, 3000);
   };
   zkus();
