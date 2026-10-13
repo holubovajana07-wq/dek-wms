@@ -922,21 +922,19 @@
     <button class="btn btn-secondary" id="btn-kamera" onclick="prepniKameru()"
             style="margin-top:10px;">📷 Skenovat kamerou</button>
 
-    <!-- Neviditelné pole, do kterého padá sken.
-         Čtečky v režimu "Automatic Text Mode" vkládají text přes
-         androidí klávesnici (IME), ne jako skutečné stisky kláves –
-         globální odchytávání takový sken vůbec nevidí. Proto tu drží
-         zaměření tohle pole. inputmode="none" zabrání, aby na displeji
-         vyskočila klávesnice. -->
-    <input id="sken-zachyt" inputmode="none" autocomplete="off"
-           autocapitalize="off" spellcheck="false" aria-hidden="true" tabindex="-1"
-           style="position:absolute;opacity:0;width:1px;height:1px;
-                  pointer-events:none;border:0;padding:0;left:-9999px;">
+    <div class="manual-or">sem padá sken, nebo zadejte ručně</div>
 
-    <div class="manual-or">nebo zadat ručně</div>
-
+    <!-- Tohle pole je zároveň cílem skenu. Dřív na to bylo schované pole
+         mimo obrazovku, jenže androidí klávesnice (IME) se k neviditelnému
+         poli nepřipojí – sken neměl kam spadnout, dokud skladník neklepl
+         do řádku. Viditelné pole ten problém nemá a skladník navíc vidí,
+         co se naskenovalo.
+         inputmode="none" drží klávesnici schovanou; přepne se na "text"
+         teprve když do pole někdo opravdu klepne. -->
     <div style="display:flex;gap:8px;">
-      <input class="form-input" id="inp-manual" placeholder="ID stroje nebo konec čísla PSP" style="flex:1;" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <input class="form-input" id="inp-manual" placeholder="naskenujte nebo napište"
+             style="flex:1;" maxlength="40" inputmode="none"
+             autocomplete="off" autocapitalize="characters" spellcheck="false">
       <button class="btn btn-secondary" style="width:auto;padding:0 16px;" onclick="manualConfirm()">→</button>
     </div>
 
@@ -1157,7 +1155,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '3.9';
+const VERZE_APP = '4.0';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -3107,9 +3105,7 @@ document.addEventListener('visibilitychange', () => {
 // ─────────────────────────────────────────────
 //  KEYBOARD – manual input enter
 // ─────────────────────────────────────────────
-el('inp-manual')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter') manualConfirm();
-});
+// Enter u ručního zadání obsluhuje skenPresPole výš – ať je na jednom místě.
 el('inp-lokace')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     state.currentLokace = e.target.value.trim().toUpperCase();
@@ -3231,39 +3227,54 @@ function hidOdesli_() {
 // když píše do ručního zadání nebo do lokace.
 function zamerSken_() {
   if (!el('screen-scan').classList.contains('active')) return;
-  const p = el('sken-zachyt');
-  if (!p) return;
+  const p = el('inp-manual');
+  if (!p || document.activeElement === p) return;
 
-  const ae = document.activeElement;
-  if (ae && ae !== p && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
-  if (ae === p) return;
-
+  // Klávesnice zůstane schovaná, dokud do pole někdo vědomě neklepne.
+  p.inputMode = 'none';
   try { p.focus({ preventScroll: true }); } catch (e) { p.focus(); }
 }
 
 (function skenPresPole() {
-  const p = el('sken-zachyt');
+  const p = el('inp-manual');
   if (!p) return;
   let budik = null;
+  let posledni = 0;
+  let rychlych = 0;
+
+  // Klepnutí do pole = skladník chce psát. Teprve tehdy se pustí klávesnice.
+  p.addEventListener('pointerdown', function () {
+    p.inputMode = 'text';
+    setTimeout(function () { p.blur(); p.focus(); }, 0);
+  });
 
   p.addEventListener('input', function () {
-    const text = p.value;
+    const ted = Date.now();
+    if (ted - posledni < 50) rychlych++; else rychlych = 0;
+    posledni = ted;
+
     clearTimeout(budik);
-    if (!text) return;
-    // Stejná pauza jako u klávesových skenů – ať se kód nerozsekne.
+    const text = p.value.trim();
+    if (text.length < 3) return;
+
+    // Odešle se samo jen když text přibýval rychleji, než stihne člověk –
+    // tedy u skenu. Ručně psané číslo se potvrdí Enterem nebo šipkou,
+    // ať se nic neodešle dřív, než to skladník dopíše.
+    if (rychlych < 3) return;
     budik = setTimeout(function () {
       p.value = '';
-      if (text.trim().length >= 3) handleScan(text.trim());
+      rychlych = 0;
+      handleScan(text);
     }, 120);
   });
 
+  // Enter obsluhuje manualConfirm – pozná ID stroje, celé PSP i konec čísla.
   p.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     clearTimeout(budik);
-    const text = p.value.trim();
-    p.value = '';
-    if (text.length >= 3) handleScan(text);
+    rychlych = 0;
+    manualConfirm();
   });
 
   // Zaměření se ztrácí při klepnutí jinam, po návratu z pozadí i samo
@@ -3282,6 +3293,8 @@ function zamerSken_() {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
               || t.tagName === 'SELECT' || t.tagName === 'BUTTON')) return;
+    // Dotek jinam než do pole = skladník chce zase skenovat,
+    // tak zpátky i s vypnutou klávesnicí.
     setTimeout(zamerSken_, 0);
   }, true);
 })();
