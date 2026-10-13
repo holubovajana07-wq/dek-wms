@@ -914,6 +914,17 @@
     </div>
     <div class="scanner-hint" id="scan-hint">Vyberte akci a namiřte kameru na QR kód stroje</div>
 
+    <!-- Neviditelné pole, do kterého padá sken.
+         Čtečky v režimu "Automatic Text Mode" vkládají text přes
+         androidí klávesnici (IME), ne jako skutečné stisky kláves –
+         globální odchytávání takový sken vůbec nevidí. Proto tu drží
+         zaměření tohle pole. inputmode="none" zabrání, aby na displeji
+         vyskočila klávesnice. -->
+    <input id="sken-zachyt" inputmode="none" autocomplete="off"
+           autocapitalize="off" spellcheck="false" aria-hidden="true" tabindex="-1"
+           style="position:absolute;opacity:0;width:1px;height:1px;
+                  pointer-events:none;border:0;padding:0;left:-9999px;">
+
     <div class="manual-or">nebo zadat ručně</div>
 
     <div style="display:flex;gap:8px;">
@@ -1142,7 +1153,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '3.5';
+const VERZE_APP = '3.6';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -1549,7 +1560,7 @@ function showTab(name) {
   const tab = TAB_PRO_OBRAZOVKU[name];
   if (tab && el('tab-' + tab)) el('tab-' + tab).classList.add('active');
 
-  if (name === 'scan') startScanner();
+  if (name === 'scan') { startScanner(); setTimeout(zamerSken_, 100); }
   else stopScanner();
 
   if (name === 'settings') {
@@ -3155,6 +3166,56 @@ function hidOdesli_() {
 
   handleScan(nacteno);
 }
+
+// ── Druhá cesta: sken přes IME do neviditelného pole ──────────
+// Tohle je ta, která na Urovo DT66 v "Automatic Text Mode" opravdu
+// funguje. Pole musí být zaměřené, jinak text nemá kam spadnout,
+// takže se zaměření průběžně vrací – ale nikdy uživateli pod rukama,
+// když píše do ručního zadání nebo do lokace.
+function zamerSken_() {
+  if (!el('screen-scan').classList.contains('active')) return;
+  const p = el('sken-zachyt');
+  if (!p) return;
+
+  const ae = document.activeElement;
+  if (ae && ae !== p && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  if (ae === p) return;
+
+  try { p.focus({ preventScroll: true }); } catch (e) { p.focus(); }
+}
+
+(function skenPresPole() {
+  const p = el('sken-zachyt');
+  if (!p) return;
+  let budik = null;
+
+  p.addEventListener('input', function () {
+    const text = p.value;
+    clearTimeout(budik);
+    if (!text) return;
+    // Stejná pauza jako u klávesových skenů – ať se kód nerozsekne.
+    budik = setTimeout(function () {
+      p.value = '';
+      if (text.trim().length >= 3) handleScan(text.trim());
+    }, 120);
+  });
+
+  p.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    clearTimeout(budik);
+    const text = p.value.trim();
+    p.value = '';
+    if (text.length >= 3) handleScan(text);
+  });
+
+  // Zaměření se ztrácí při klepnutí jinam, po návratu z pozadí i samo
+  // od sebe. Levnější je ho pravidelně vracet než hlídat všechny případy.
+  setInterval(zamerSken_, 1200);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) setTimeout(zamerSken_, 300);
+  });
+})();
 
 document.addEventListener('keydown', e => {
   // Na přihlašovací obrazovce obsluhuje klávesnice PIN – ať jde zadat
