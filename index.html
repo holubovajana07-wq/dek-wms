@@ -902,7 +902,11 @@
 
     <div class="section-title">📥 Příjem – naskenovat stroj</div>
 
-    <div class="scanner-container" id="scanner-box">
+    <!-- Kamera se NESPOUŠTÍ sama. Skenovací modul čtečky si bere stejný
+         hardware, takže běžící náhled kamery umí spoušť úplně umlčet –
+         laser pak nezabere a vypadá to, že je rozbitý. Ve skladu se
+         skenuje laserem, kamera je záloha pro poškrábané štítky. -->
+    <div class="scanner-container" id="scanner-box" style="display:none;">
       <video id="preview" playsinline muted autoplay></video>
       <div class="scanner-overlay">
         <div class="scanner-frame">
@@ -912,7 +916,11 @@
         </div>
       </div>
     </div>
-    <div class="scanner-hint" id="scan-hint">Vyberte akci a namiřte kameru na QR kód stroje</div>
+
+    <div class="scanner-hint" id="scan-hint">Namiřte čtečku na štítek a zmáčkněte spoušť</div>
+
+    <button class="btn btn-secondary" id="btn-kamera" onclick="prepniKameru()"
+            style="margin-top:10px;">📷 Skenovat kamerou</button>
 
     <!-- Neviditelné pole, do kterého padá sken.
          Čtečky v režimu "Automatic Text Mode" vkládají text přes
@@ -1149,7 +1157,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '3.7';
+const VERZE_APP = '3.8';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -1556,8 +1564,9 @@ function showTab(name) {
   const tab = TAB_PRO_OBRAZOVKU[name];
   if (tab && el('tab-' + tab)) el('tab-' + tab).classList.add('active');
 
-  if (name === 'scan') { startScanner(); setTimeout(zamerSken_, 100); }
-  else stopScanner();
+  // Kamera se zapíná až tlačítkem – viz poznámka u scanner-box.
+  if (name === 'scan') setTimeout(zamerSken_, 100);
+  else vypniKameru();
 
   if (name === 'settings') {
     // Verze aplikace + verze skriptu. Když se rozejdou, jedna z půlek
@@ -1669,6 +1678,26 @@ function scanLoop() {
   setTimeout(scanLoop, odStartu < 15000 ? 80 : 300);
 }
 
+// Kamera je volitelná záloha. Zapíná se tlačítkem a hned po úspěšném
+// skenu se zase vypne, aby nedržela hardware, který potřebuje laser.
+function prepniKameru() {
+  if (state.scanning) { vypniKameru(); return; }
+  el('scanner-box').style.display = '';
+  el('btn-kamera').textContent = '✕ Vypnout kameru';
+  el('scan-hint').textContent = 'Namiřte kameru na QR kód stroje';
+  startScanner();
+}
+
+function vypniKameru() {
+  stopScanner();
+  const box = el('scanner-box');
+  if (box) box.style.display = 'none';
+  const btn = el('btn-kamera');
+  if (btn) btn.textContent = '📷 Skenovat kamerou';
+  const hint = el('scan-hint');
+  if (hint) hint.textContent = 'Namiřte čtečku na štítek a zmáčkněte spoušť';
+}
+
 function stopScanner() {
   state.scanning = false;
   if (state.stream) {
@@ -1688,7 +1717,7 @@ function handleScan(raw) {
     return;
   }
 
-  stopScanner();
+  vypniKameru();
 
   // Extract ID – QR may contain just the ID or a URL/string containing it
   // DEK format appears to be 4-char alphanumeric (e.g. 9JT9, 1X7M)
@@ -2146,7 +2175,6 @@ function skryjVarovani() {
 
 function goBack() {
   showTab('scan');
-  startScanner();
   state.currentId = null;
   state.currentPsp = null;
   state.currentLokace = null;
@@ -3063,10 +3091,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopScanner();
   } else {
-    // Čtečka se probrala – seznam mohl mezitím zastarat
+    // Čtečka se probrala – seznam mohl mezitím zastarat.
+    // Kamera se po probuzení ZÁMĚRNĚ nerozjíždí, ať nebere hardware laseru.
     if (state.uzivatel) stahniIndex();
-    const activeScan = el('screen-scan').classList.contains('active');
-    if (activeScan) setTimeout(startScanner, 300);
   }
 });
 
