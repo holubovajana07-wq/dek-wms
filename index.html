@@ -1111,8 +1111,9 @@
     </div>
 
     <div class="form-note" id="info-lokace" style="display:none;">
-      Lokace jsou společné pro všechny čtečky a nastavují se centrálně.
-      Na čtečce se nemění — kdyby bylo potřeba je upravit, řekněte Janě.
+      Lokace se berou z listu <strong>LOKACE</strong> v evidenční tabulce a jsou
+      společné pro všechny čtečky. Na čtečce se nemění — kdyby bylo potřeba
+      je upravit, řekněte Janě.
     </div>
 
     <div class="divider"></div>
@@ -1167,6 +1168,7 @@ const state = {
   indexSeznam: null,         // totéž jako pole, pro hledání podle svozu
   indexCas: null,            // kdy byl index pořízen
   indexCasovac: null,        // průběžné obnovování indexu
+  lokaceZTabulky: false,     // lokace přišly z listu LOKACE, ne z konfigurace
   vydejCasovac: null,        // průběžné obnovování seznamu k výdeji
   vydejNacteno: null,        // kdy byl seznam k výdeji naposledy načten
   vydejData: null,           // seznam poboček načtený ze serveru
@@ -1200,8 +1202,9 @@ function jeUrlZKodu() {
 // Lokace se stejně jako adresa nastavují centrálně v konfigurace.js,
 // aby se nemusely ťukat na každé čtečce zvlášť.
 function jsouLokaceZKodu() {
-  return typeof WMS_LOKACE !== 'undefined'
-      && Array.isArray(WMS_LOKACE) && WMS_LOKACE.length > 0;
+  return state.lokaceZTabulky === true
+      || (typeof WMS_LOKACE !== 'undefined'
+          && Array.isArray(WMS_LOKACE) && WMS_LOKACE.length > 0);
 }
 
 function loadConfig() {
@@ -1212,8 +1215,17 @@ function loadConfig() {
   // Adresa z konfigurace.js vždy přebije to, co má čtečka uložené z minula.
   // Jinak by po změně adresy zůstaly čtečky viset na té staré.
   if (jeUrlZKodu()) state.config.scriptUrl = WMS_URL;
-  // Totéž pro lokace – změna v konfiguraci se má projevit na všech čtečkách.
+  // Lokace: nejdřív z konfigurace.js, pak je případně přebijí ty z tabulky
+  // (list LOKACE), které čtečka dostala s posledním indexem. Díky uložené
+  // kopii jsou správné hned po spuštění, ještě než dorazí nový index.
   if (jsouLokaceZKodu()) state.config.lokacePresets = WMS_LOKACE.slice();
+  try {
+    const ul = JSON.parse(lsGet('dek_wms_lokace') || 'null');
+    if (Array.isArray(ul) && ul.length) {
+      state.config.lokacePresets = ul;
+      state.lokaceZTabulky = true;
+    }
+  } catch (e) {}
   // Populate settings fields
   setTimeout(() => {
     el('set-script-url').value = state.config.scriptUrl || '';
@@ -2746,6 +2758,16 @@ function zpracujIndex_(data) {
     (podleDokladu[klic] = podleDokladu[klic] || []).push(o.nazev || '');
   });
   state.prislusenstvi = podleDokladu;
+
+  // Lokace přicházejí z listu LOKACE spolu s indexem. Mají přednost před
+  // konfigurace.js i před tím, co má čtečka uložené – mění se v tabulce
+  // a do minuty je mají všechny čtečky stejné.
+  if (Array.isArray(data.lokace) && data.lokace.length) {
+    state.config.lokacePresets = data.lokace.slice();
+    state.lokaceZTabulky = true;
+    try { lsSet('dek_wms_lokace', JSON.stringify(data.lokace)); } catch (e) {}
+    renderLokacePresets();
+  }
 }
 
 // Všechno, co na dokladu ještě čeká na příjem – z indexu, bez serveru.

@@ -15,6 +15,7 @@
 
 const WMS_CONFIG = {
   dataList:      'DATA',
+  lokaceList:    'LOKACE',
   pohybyList:    'POHYBY',
   uzivateleList: 'UZIVATELE',
 
@@ -811,6 +812,9 @@ function getIndexPrijem(cerstve) {
     stroje: stroje,
     poleP:  POLE_PRISLUSENSTVI,
     prislusenstvi: prislusenstvi,
+    // Lokace jedou s indexem, takže je čtečka dostane bez dalšího kolečka
+    // a změna v listu LOKACE se projeví do minuty na všech čtečkách.
+    lokace: getAktivniLokace_(),
   };
 
   try {
@@ -1163,6 +1167,180 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
   } catch (e) {}
 
   return { zapsanoRadku: zapsano, jizZapsano: false };
+}
+
+// ============================================================
+// LOKACE VE SKLADU
+// ============================================================
+// List LOKACE řídí tlačítka, která skladník vidí při příjmu.
+// Sloupec "Strojů teď" plní skript – ukazuje, kolik strojů na lokaci
+// zrovna stojí, aby se nedala vypnout lokace, která je obsazená.
+//
+//   Lokace | Aktivní | Strojů teď | Které stroje | Stav | Přepočítáno
+//
+// Obsazenost se počítá z listu POHYBY: u každého stroje se vezme jeho
+// NEJNOVĚJŠÍ pohyb. Když je to příjem s lokací, stroj tam stojí.
+// Když výdej, je pryč. Nic se neodečítá ručně.
+// ============================================================
+
+const LOKACE_HLAVICKA = ['Lokace', 'Aktivní', 'Strojů teď', 'Které stroje', 'Stav', 'Přepočítáno'];
+
+function getLokaceList_() {
+  const ss = getSS_();
+  let sheet = ss.getSheetByName(WMS_CONFIG.lokaceList);
+  if (!sheet) {
+    sheet = ss.insertSheet(WMS_CONFIG.lokaceList);
+    sheet.appendRow(LOKACE_HLAVICKA);
+    sheet.getRange(1, 1, 1, LOKACE_HLAVICKA.length)
+      .setBackground('#C8281A').setFontColor('#ffffff').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 90);
+    sheet.setColumnWidth(4, 240);
+    sheet.setColumnWidth(5, 220);
+    sheet.setColumnWidth(6, 150);
+  }
+  return sheet;
+}
+
+// Seznam aktivních lokací pro čtečku. Posílá se spolu s indexem,
+// takže to nestojí žádné kolečko navíc.
+function getAktivniLokace_() {
+  try {
+    const sheet = getLokaceList_();
+    const n = sheet.getLastRow() - 1;
+    if (n < 1) return [];
+
+    const data = sheet.getRange(2, 1, n, 2).getValues();
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const nazev = String(data[i][0] || '').trim().toUpperCase();
+      if (!nazev) continue;
+      const a = String(data[i][1] || '').trim().toUpperCase();
+      // Prázdné pole = aktivní. Vypíná se až zapsáním NE / FALSE.
+      if (a === 'NE' || a === 'FALSE' || a === 'N') continue;
+      out.push(nazev);
+    }
+    return out;
+  } catch (e) {
+    Logger.log('getAktivniLokace_: ' + e.message);
+    return [];
+  }
+}
+
+// Projde POHYBY a vrátí mapu lokace → pole ID strojů, které tam stojí.
+function spocitejObsazenost_() {
+  const ss = getSS_();
+  const sheet = ss.getSheetByName(WMS_CONFIG.pohybyList);
+  if (!sheet) return {};
+
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) return {};
+
+  const sirka = sheet.getLastColumn();
+  const hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0]
+    .map(function (h) { return String(h || '').trim().toLowerCase(); });
+
+  const iId     = hlavicka.indexOf('id stroje');
+  const iAkce   = hlavicka.indexOf('akce');
+  const iLokace = hlavicka.indexOf('lokace cs2');
+  if (iId < 0 || iAkce < 0 || iLokace < 0) {
+    Logger.log('POHYBY nemá čekané sloupce (ID stroje / Akce / Lokace CS2).');
+    return {};
+  }
+
+  const data = sheet.getRange(2, 1, n, sirka).getValues();
+
+  // Od nejnovějšího dolů; první nález o stroji rozhoduje.
+  const videno = {};
+  const kde = {};
+  for (let i = n - 1; i >= 0; i--) {
+    const id = String(data[i][iId] || '').trim().toUpperCase();
+    if (!id || videno[id]) continue;
+    videno[id] = true;
+
+    const akce = String(data[i][iAkce] || '').toUpperCase();
+    if (akce.indexOf('PŘÍJEM') < 0) continue;      // výdej = stroj je pryč
+
+    const lok = String(data[i][iLokace] || '').trim().toUpperCase();
+    if (!lok || lok === '—') continue;             // přijat bez určené lokace
+
+    (kde[lok] = kde[lok] || []).push(id);
+  }
+  return kde;
+}
+
+// Přepočítá obsazenost a zapíše ji do listu LOKACE.
+// Spouštět ručně, nebo si na to nastavte časovou spoušť (stačí po hodině).
+function prepocitejLokace() {
+  const sheet = getLokaceList_();
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) {
+    Logger.log('List LOKACE je prázdný – doplňte lokace do sloupce A, nebo spusťte zalozLokace().');
+    return;
+  }
+
+  const kde = spocitejObsazenost_();
+  const data = sheet.getRange(2, 1, n, LOKACE_HLAVICKA.length).getValues();
+  const ted = new Date();
+  const znamé = {};
+  let konflikty = 0;
+
+  for (let i = 0; i < n; i++) {
+    const nazev = String(data[i][0] || '').trim().toUpperCase();
+    if (!nazev) continue;
+    znamé[nazev] = true;
+
+    const a = String(data[i][1] || '').trim().toUpperCase();
+    const aktivni = !(a === 'NE' || a === 'FALSE' || a === 'N');
+    const stroje = kde[nazev] || [];
+
+    data[i][2] = stroje.length;
+    data[i][3] = stroje.slice(0, 20).join(', ') + (stroje.length > 20 ? ' …' : '');
+    data[i][4] = !aktivni && stroje.length
+      ? '⚠ VYPNUTÁ, ale stojí tam ' + stroje.length + ' ' + (stroje.length === 1 ? 'stroj' : 'strojů')
+      : (!aktivni ? 'vypnutá, prázdná'
+                  : (stroje.length ? 'obsazená' : 'volná'));
+    data[i][5] = ted;
+
+    if (!aktivni && stroje.length) konflikty++;
+  }
+
+  sheet.getRange(2, 1, n, LOKACE_HLAVICKA.length).setValues(data);
+
+  Logger.log('Přepočítáno ' + n + ' lokací.');
+  const celkem = Object.keys(kde).reduce(function (s, k) { return s + kde[k].length; }, 0);
+  Logger.log('Strojů na CS celkem: ' + celkem);
+
+  // Stroje stojící na lokaci, která v listu vůbec není
+  const cizi = Object.keys(kde).filter(function (k) { return !znamé[k]; });
+  if (cizi.length) {
+    Logger.log('');
+    Logger.log('⚠ Lokace, které v listu nejsou, ale stroje na nich stojí:');
+    cizi.forEach(function (k) { Logger.log('   ' + k + ' – ' + kde[k].length + ' (' + kde[k].join(', ') + ')'); });
+    Logger.log('Doplňte je do listu, nebo stroje přeskladněte.');
+  }
+
+  if (konflikty) {
+    Logger.log('');
+    Logger.log('⚠ ' + konflikty + ' vypnutých lokací je obsazených – sloupec Stav je označuje.');
+  }
+}
+
+// Založí list LOKACE a naplní ho výchozí sadou. Spustit jednou.
+function zalozLokace() {
+  const VYCHOZI = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+
+  const sheet = getLokaceList_();
+  if (sheet.getLastRow() > 1) {
+    Logger.log('List LOKACE už má ' + (sheet.getLastRow() - 1) + ' řádků – nechávám být.');
+    Logger.log('Spusťte prepocitejLokace() pro aktualizaci obsazenosti.');
+    return;
+  }
+
+  const radky = VYCHOZI.map(function (l) { return [l, 'ANO', 0, '', 'volná', new Date()]; });
+  sheet.getRange(2, 1, radky.length, LOKACE_HLAVICKA.length).setValues(radky);
+  Logger.log('Založeno ' + radky.length + ' lokací: ' + VYCHOZI.join(', '));
+  Logger.log('Vypnout lokaci = napsat NE do sloupce Aktivní.');
 }
 
 // ============================================================
