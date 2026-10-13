@@ -113,13 +113,39 @@ function cas() { return new Date().toLocaleTimeString('cs-CZ'); }
     r2.ok(WMS_URL.slice(0, 60) + '…');
   }
 
-  // 3. Stránka aplikace ze sítě
-  var r3 = pridej('Stažení aplikace');
+  // 3. Stránka aplikace ze sítě + porovnání verzí
+  var r3 = pridej('Verze aplikace');
   try {
     var t = Date.now();
     var resp = await fetch('./index.html?kontrola=' + t, { cache: 'no-store' });
-    if (resp.ok) r3.ok('Staženo za ' + (Date.now() - t) + ' ms.');
-    else r3.chyba('Server odpověděl chybou ' + resp.status + '.');
+    if (!resp.ok) {
+      r3.chyba('Server odpověděl chybou ' + resp.status + '.');
+    } else {
+      var html = await resp.text();
+      var m = html.match(/VERZE_APP\s*=\s*'([^']+)'/);
+      var naWebu = m ? m[1] : '?';
+
+      // Co má čtečka uloženou – ze stejné adresy, ale z mezipaměti
+      var vCtecce = '?';
+      try {
+        var cr = await caches.match('./index.html');
+        if (!cr) cr = await caches.match('./');
+        if (cr) {
+          var ch = await cr.text();
+          var cm = ch.match(/VERZE_APP\s*=\s*'([^']+)'/);
+          if (cm) vCtecce = cm[1];
+        } else {
+          vCtecce = naWebu + ' (nic uloženého, bere se ze sítě)';
+        }
+      } catch (e) {}
+
+      if (vCtecce === naWebu || vCtecce.indexOf(naWebu) === 0) {
+        r3.ok('Aktuální: v' + naWebu + ' · staženo za ' + (Date.now() - t) + ' ms.');
+      } else {
+        r3.chyba('Na webu je v' + naWebu + ', ale čtečka drží v' + vCtecce
+          + '. Použijte tlačítko „Vyčistit aplikaci a stáhnout znovu" níž.');
+      }
+    }
   } catch (e) {
     r3.chyba('Nepodařilo se stáhnout: ' + e.message + '. Nejspíš chybí signál.');
   }

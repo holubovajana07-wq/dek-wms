@@ -3087,7 +3087,42 @@ el('inp-lokace')?.addEventListener('input', e => {
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('sw.js')
+      .then(function (reg) {
+        // Samotná registrace novou verzi nestáhne. Bez tohohle zůstala
+        // čtečka viset na verzi, se kterou byla nainstalovaná – aplikace
+        // se tvářila aktuálně a přitom běžela měsíc starý kód.
+        reg.update();
+        setInterval(function () { reg.update(); }, 30 * 60 * 1000);
+      })
       .catch(function (e) { console.warn('Service worker se nepodařilo zaregistrovat:', e.message); });
+
+    // Kontrola i při návratu z pozadí – čtečka bývá uspaná celou směnu.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) return;
+      navigator.serviceWorker.getRegistration().then(function (reg) {
+        if (reg) reg.update();
+      }).catch(function () {});
+    });
+  });
+
+  // Když novou verzi převezme, stránka se překreslí. Nikdy ale uprostřed
+  // práce – skladník by přišel o rozdělaný příjem. Počká se, až bude
+  // na skenovací nebo přihlašovací obrazovce.
+  let prenacteno = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (prenacteno) return;
+    prenacteno = true;
+
+    const vhodnaChvile = function () {
+      return el('screen-scan').classList.contains('active')
+          || el('screen-login').classList.contains('active');
+    };
+
+    const zkus = function () {
+      if (vhodnaChvile()) { location.reload(); return; }
+      setTimeout(zkus, 3000);
+    };
+    zkus();
   });
 }
 
