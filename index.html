@@ -666,6 +666,41 @@
       margin-top: 2px;
     }
 
+    /* ── LOKACE VE VÝDEJI ──
+       Skladník podle ní jde ke stroji, tak je schválně velká.
+       Odznak vedle čísla PSP je pro rychlé přehlédnutí celého seznamu,
+       řádek dole pro jistotu, až stojí nad konkrétním dokladem. */
+    .vydej-hlavicka {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .vydej-lokace-odznak {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: var(--red);
+      color: #fff;
+      border-radius: 5px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+    .vydej-lokace {
+      margin-top: 8px;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+    }
+    .vydej-lokace strong {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--text);
+    }
+    .vydej-lokace.prazdna { color: var(--amber); font-weight: 600; }
+    .vydej-lokace-chybi { color: var(--amber); font-weight: 600; font-size: 12px; }
+
     /* ── HISTORY ── */
     .history-list { display: flex; flex-direction: column; gap: 8px; }
     .history-item {
@@ -1161,7 +1196,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.4';
+const VERZE_APP = '4.5';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -2680,12 +2715,33 @@ function vykresliPspList() {
       + (x.idStroje ? '<b>' + x.idStroje + '</b> · ' : '')
       + (x.nazev || '—') + '</div>'
     ).join('');
+
+    // Kde stroje leží. Bez toho je skladník hledá po skladu, přestože
+    // si lokaci sám zapsal při příjmu. Když je doklad rozvezený po víc
+    // místech, vypíšou se všechna.
+    const lokace = [];
+    psp.polozky.forEach(x => {
+      const l = (x.lokace || '').trim();
+      if (l && lokace.indexOf(l) < 0) lokace.push(l);
+    });
+    const bezLokace = psp.polozky.some(x => x.idStroje && !(x.lokace || '').trim());
+
+    const lokaceRadek = lokace.length
+      ? '<div class="vydej-lokace">LOKACE: <strong>' + lokace.join(' · ') + '</strong>'
+        + (bezLokace ? ' <span class="vydej-lokace-chybi">+ neuvedená</span>' : '')
+        + '</div>'
+      : '<div class="vydej-lokace prazdna">LOKACE: neuvedená</div>';
+
     return `
       <div class="vydej-radek${vybrano}" onclick="prepniPsp(${i})" style="align-items:flex-start;">
         <div class="vydej-check">✓</div>
         <div class="vydej-telo">
-          <div class="vydej-nazev">${psp.cisloPsp}</div>
+          <div class="vydej-hlavicka">
+            <span class="vydej-nazev">${psp.cisloPsp}</span>
+            ${lokace.length ? '<span class="vydej-lokace-odznak">' + lokace.join(' · ') + '</span>' : ''}
+          </div>
           ${polozky}
+          ${lokaceRadek}
         </div>
       </div>`;
   }).join('');

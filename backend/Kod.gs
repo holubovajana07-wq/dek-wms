@@ -159,6 +159,7 @@ function getSS_() {
 function zapomen_() {
   _ss = null;
   _wmsSloupce = null;
+  _lokaceStroju = null;
   for (const k in _listy) delete _listy[k];
 }
 
@@ -645,6 +646,7 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
   const b = function (radek, sloupec) { return radek[sloupec - B_OD]; };
 
   const pobocky = {};
+  const lokace_ = lokaceStroju_();   // ID stroje → lokace z příjmu
 
   for (let i = 0; i < n; i++) {
     const rA = blokA[i], rB = blokB[i];
@@ -673,11 +675,18 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
     if (!pobocky[kod].psp[psp]) {
       pobocky[kod].psp[psp] = { cisloPsp: psp, datumPrijmu: naIso_(prijato), polozky: [] };
     }
+
+    // Lokace, kam skladník stroj při příjmu odložil. Není v DATA –
+    // dohledává se v POHYBY, aby ho kolega při nakládce nehledal po skladu.
+    const idStroje = String(a(rA, c.idStroje) || '').trim();
+    const lokace = idStroje ? (lokace_[idStroje.toUpperCase()] || '') : '';
+
     pobocky[kod].psp[psp].polozky.push({
       radek:    odRadku + i,
       idStroje: a(rA, c.idStroje),
       nazev:    a(rA, c.nazevPolozky),
       ecPuj:    a(rA, c.ecPuj),
+      lokace:   lokace,
     });
   }
 
@@ -1227,14 +1236,22 @@ function getAktivniLokace_() {
   }
 }
 
-// Projde POHYBY a vrátí mapu lokace → pole ID strojů, které tam stojí.
-function spocitejObsazenost_() {
+// Projde POHYBY a vrátí mapu ID stroje → lokace, kde teď stojí.
+// U každého stroje rozhoduje jeho NEJNOVĚJŠÍ pohyb: příjem s lokací
+// znamená, že tam stojí, výdej že je pryč.
+//
+// Jeden průchod slouží obsazenosti lokací i výdeji – POHYBY roste
+// a číst ho dvakrát by bylo zbytečné.
+let _lokaceStroju = null;
+function lokaceStroju_() {
+  if (_lokaceStroju) return _lokaceStroju;
+
   const ss = getSS_();
   const sheet = ss.getSheetByName(WMS_CONFIG.pohybyList);
-  if (!sheet) return {};
+  if (!sheet) return (_lokaceStroju = {});
 
   const n = sheet.getLastRow() - 1;
-  if (n < 1) return {};
+  if (n < 1) return (_lokaceStroju = {});
 
   const sirka = sheet.getLastColumn();
   const hlavicka = sheet.getRange(1, 1, 1, sirka).getValues()[0]
@@ -1245,15 +1262,14 @@ function spocitejObsazenost_() {
   const iLokace = hlavicka.indexOf('lokace cs2');
   if (iId < 0 || iAkce < 0 || iLokace < 0) {
     Logger.log('POHYBY nemá čekané sloupce (ID stroje / Akce / Lokace CS2).');
-    return {};
+    return (_lokaceStroju = {});
   }
 
   const data = sheet.getRange(2, 1, n, sirka).getValues();
 
-  // Od nejnovějšího dolů; první nález o stroji rozhoduje.
   const videno = {};
   const kde = {};
-  for (let i = n - 1; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {      // od nejnovějšího
     const id = String(data[i][iId] || '').trim().toUpperCase();
     if (!id || videno[id]) continue;
     videno[id] = true;
@@ -1264,8 +1280,19 @@ function spocitejObsazenost_() {
     const lok = String(data[i][iLokace] || '').trim().toUpperCase();
     if (!lok || lok === '—') continue;             // přijat bez určené lokace
 
-    (kde[lok] = kde[lok] || []).push(id);
+    kde[id] = lok;
   }
+  return (_lokaceStroju = kde);
+}
+
+// Obrácený pohled: lokace → pole ID strojů, které na ní stojí.
+function spocitejObsazenost_() {
+  const podleStroje = lokaceStroju_();
+  const kde = {};
+  Object.keys(podleStroje).forEach(function (id) {
+    const lok = podleStroje[id];
+    (kde[lok] = kde[lok] || []).push(id);
+  });
   return kde;
 }
 
