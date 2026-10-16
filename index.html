@@ -1196,7 +1196,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.5';
+const VERZE_APP = '4.6';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
@@ -1605,6 +1605,13 @@ function showTab(name) {
 
   // Kamera se zapíná až tlačítkem – viz poznámka u scanner-box.
   if (name === 'scan') {
+    // SKENOVACÍ OBRAZOVKA JE VŽDYCKY PŘÍJEM.
+    // Výdej má vlastní cestu (seznam poboček) a posílá akci napevno.
+    // Dřív se tu akce nenastavovala a nesla se z předchozí obrazovky:
+    // když zůstala na "vydej", nadpis hlásil Příjem, ale uložil se VÝDEJ.
+    // Stalo se to 14. 10. 2026 u PSP-700-26-00512.
+    state.currentAction = 'prijem';
+
     // Zaměřit HNED, ještě uvnitř doteku, kterým skladník přepnul na příjem.
     // Android zaměření pole mimo dotek většinou ignoruje – proto dřív
     // musel nejdřív klepnout do řádku, aby měl sken kam spadnout.
@@ -2034,6 +2041,10 @@ async function overStavNaPozadi_(id) {
 // místo štítků na jednotlivých strojích. Odbaví se celý doklad naráz –
 // všechno na něm přijelo společně.
 async function showConfirmScreenPsp(psp) {
+  // Sken dokladu je vždycky příjem – karta to i nahlas píše.
+  // Bez tohohle řádku se akce brala z předchozí obrazovky a mohl se
+  // uložit výdej pod nadpisem „Příjem celého dokladu".
+  state.currentAction = 'prijem';
   showTab('confirm');
 
   el('res-id').textContent    = psp;
