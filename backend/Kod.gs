@@ -312,7 +312,7 @@ function doGet(e) {
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '3.4', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '4.6', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };
@@ -2311,6 +2311,60 @@ function zkontrolujFormatovani() {
   Logger.log('');
   Logger.log('Když má zelený řádek barevné pozadí a ten od WMS bílé,');
   Logger.log('obarvuje to kód půjčovny – a ten se po zápisu ze skriptu nespustí.');
+}
+
+// Projde konkrétní PSP a řekne, co u něj WMS udělalo a co ne.
+// Spusťte, když se zapsal čas, ale nezatrhl se příznak nebo nezměnila barva.
+function procNezatrzeno() {
+  const PSP = 'PSP-130-26-00126';   // ← sem číslo dokladu
+
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+
+  Logger.log('--- Nastavení nasazeného skriptu ---');
+  Logger.log('  zaskrtavatPriznaky: ' + WMS_CONFIG.zaskrtavatPriznaky);
+  Logger.log('  sloupec T Svezeno:  ' + c.svezeno + '  (má být 20)');
+  Logger.log('  sloupec U Nesvezeno:' + c.nesvezeno + '  (má být 21)');
+  Logger.log('  sloupec V Odesláno: ' + c.odeslano + '  (má být 22)');
+  Logger.log('  WMS příjem je sloupec: ' + wms.prijem);
+  Logger.log('  WMS výdej  je sloupec: ' + wms.vydej);
+  Logger.log('  barvaPoPrijmu: ' + WMS_CONFIG.barvaPoPrijmu + ' · barvaPoVydeji: ' + WMS_CONFIG.barvaPoVydeji);
+  Logger.log('  barvyKPrepsani: ' + WMS_CONFIG.barvyKPrepsani.join(', '));
+  Logger.log('');
+
+  const posledni = sheet.getLastRow();
+  const sirka = sheet.getLastColumn();
+  const pspCol = sheet.getRange(2, c.cisloPsp, posledni - 1, 1).getValues();
+  const hledane = PSP.trim().toUpperCase();
+
+  let nasel = 0;
+  for (let i = 0; i < pspCol.length; i++) {
+    if (String(pspCol[i][0] || '').trim().toUpperCase() !== hledane) continue;
+    const r = i + 2;
+    nasel++;
+
+    const radek = sheet.getRange(r, 1, 1, sirka).getValues()[0];
+    const pozadi = sheet.getRange(r, 1, 1, sirka).getBackgrounds()[0];
+    const barvaF = String(pozadi[c.cisloPsp - 1] || '').toLowerCase();
+
+    Logger.log('řádek ' + r + '  stroj ' + (radek[c.idStroje - 1] || '(příslušenství)'));
+    Logger.log('   WMS příjem: ' + (radek[wms.prijem - 1] || 'prázdné'));
+    Logger.log('   WMS výdej:  ' + (radek[wms.vydej - 1] || 'prázdné'));
+    Logger.log('   T=' + radek[c.svezeno - 1] + '  U=' + radek[c.nesvezeno - 1] + '  V=' + radek[c.odeslano - 1]);
+    Logger.log('   barva ve sloupci F: ' + barvaF
+      + (WMS_CONFIG.barvyKPrepsani.indexOf(barvaF) < 0 ? '  ⚠ NENÍ v barvyKPrepsani – WMS ji nepřepíše' : '  (přepsatelná)'));
+
+    if (radek[wms.vydej - 1] && radek[c.odeslano - 1] !== true) {
+      Logger.log('   ⚠ Je zapsaný čas výdeje, ale V není zatržené.');
+    }
+    if (radek[wms.prijem - 1] && radek[c.svezeno - 1] !== true) {
+      Logger.log('   ⚠ Je zapsaný čas příjmu, ale T není zatržené.');
+    }
+    Logger.log('');
+  }
+
+  if (!nasel) Logger.log('Doklad ' + PSP + ' se v listu nenašel.');
 }
 
 // Řekne u konkrétního řádku, proč ho WMS nepřebarvilo.
