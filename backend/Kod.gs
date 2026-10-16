@@ -2313,6 +2313,164 @@ function zkontrolujFormatovani() {
   Logger.log('obarvuje to kód půjčovny – a ten se po zápisu ze skriptu nespustí.');
 }
 
+// Projde všechny řádky odbavené přes čtečku a řekne, které nemají
+// barvu, jakou by mít měly – a hlavně PROČ. Nic nemění.
+//
+// WMS přebarvuje jen řádky, jejichž současná barva je v barvyKPrepsani.
+// Řádek s jiným odstínem (ruční zvýraznění, jiná automatizace) se
+// přeskočí – proto "nezezelená to jen někdy".
+function zkontrolujBarvy() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) { Logger.log('Tabulka je prázdná.'); return; }
+
+  const sirka  = sheet.getLastColumn();
+  const vse    = sheet.getRange(2, 1, n, sirka).getValues();
+  const pozadi = sheet.getRange(2, c.cisloPsp, n, 1).getBackgrounds();
+
+  const neznama = {};
+  let sedi = 0, spatne = 0, preskoceno = 0;
+  const ukazky = [];
+
+  for (let i = 0; i < n; i++) {
+    const r = vse[i];
+    if (r[c.storno - 1] === true) continue;
+    const prijem = r[wms.prijem - 1] instanceof Date;
+    const vydej  = r[wms.vydej  - 1] instanceof Date;
+    if (!prijem && !vydej) continue;
+
+    const maByt = vydej ? WMS_CONFIG.barvaPoVydeji : WMS_CONFIG.barvaPoPrijmu;
+    const ted   = String(pozadi[i][0] || '').toLowerCase();
+
+    if (ted === maByt.toLowerCase()) { sedi++; continue; }
+
+    if (WMS_CONFIG.barvyKPrepsani.indexOf(ted) < 0) {
+      preskoceno++;
+      neznama[ted] = (neznama[ted] || 0) + 1;
+      if (ukazky.length < 10) ukazky.push('ř. ' + (i + 2) + '  ' + r[c.cisloPsp - 1]
+        + '  má ' + ted + ', měla by ' + maByt + '  → WMS na ni nesáhne');
+    } else {
+      spatne++;
+      if (ukazky.length < 10) ukazky.push('ř. ' + (i + 2) + '  ' + r[c.cisloPsp - 1]
+        + '  má ' + ted + ', měla by ' + maByt + '  → přebarvitelná, ale nepřebarvená');
+    }
+  }
+
+  Logger.log('--- Barvy u řádků odbavených přes čtečku ---');
+  Logger.log('  barva sedí:                    ' + sedi);
+  Logger.log('  přeskočeno kvůli cizí barvě:   ' + preskoceno);
+  Logger.log('  přebarvitelné, ale nepřebarvené: ' + spatne);
+  Logger.log('');
+
+  const klice = Object.keys(neznama);
+  if (klice.length) {
+    Logger.log('Barvy, které WMS nezná (proto je nechává být):');
+    klice.sort(function (a, b) { return neznama[b] - neznama[a]; })
+         .forEach(function (k) { Logger.log('   ' + neznama[k] + '×  ' + (k || '(bez výplně)')); });
+    Logger.log('Když některá z nich patří mezi běžné stavové barvy,');
+    Logger.log('přidejte ji do barvyKPrepsani v nastavení nahoře.');
+    Logger.log('');
+  }
+
+  if (ukazky.length) { Logger.log('Ukázky:'); ukazky.forEach(function (s) { Logger.log('   ' + s); }); }
+  else Logger.log('✓ Všechny řádky mají barvu, jakou mít mají.');
+
+  Logger.log('');
+  const pravidla = sheet.getConditionalFormatRules();
+  Logger.log(pravidla.length
+    ? '⚠ List má ' + pravidla.length + ' pravidel podmíněného formátování – ta umí barvu překrýt, i když je zapsaná správně.'
+    : 'Podmíněné formátování: žádné.');
+}
+
+// Najde rozpory mezi tím, co ví WMS, a tím, co vidí velká automatizace.
+//
+// WMS zapisuje do vlastních sloupců a do R/S schválně NESAHÁ – díky tomu
+// je vidět, co šlo čtečkou a co ručně. Cena za to je, že robot čte R a S
+// a o pohybech z WMS neví: může PSP přeplánovat nebo poslat pobočce
+// upozornění, že nenaložila, přestože stroj dávno leží na CS.
+//
+// Tahle funkce měří, jak velký ten rozpor doopravdy je.
+function zkontrolujRozporSWms() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) { Logger.log('Tabulka je prázdná.'); return; }
+
+  const sirka = sheet.getLastColumn();
+  const vse = sheet.getRange(2, 1, n, sirka).getValues();
+
+  const psp = {};
+  for (let i = 0; i < n; i++) {
+    const r = vse[i];
+    if (r[c.storno - 1] === true) continue;
+    const p = String(r[c.cisloPsp - 1] || '').trim().toUpperCase();
+    if (!/^PSP-\d+-\d+-\d+$/.test(p)) continue;
+
+    if (!psp[p]) {
+      psp[p] = { psp: p, radek: i + 2,
+        prijemWms: r[wms.prijem - 1] instanceof Date ? r[wms.prijem - 1] : null,
+        vydejWms:  r[wms.vydej  - 1] instanceof Date ? r[wms.vydej  - 1] : null,
+        R: r[c.svezenoNaCS - 1] instanceof Date ? r[c.svezenoNaCS - 1] : null,
+        S: r[c.odeslanoZCS - 1] instanceof Date ? r[c.odeslanoZCS - 1] : null,
+        U: r[c.nesvezeno - 1] === true,
+        Q: String(r[c.datumSvozu - 1] || ''),
+        AI: String(r[34] || '') };   // AI = Upozorněno nenaloženo
+    }
+  }
+
+  const vsechna = Object.keys(psp).map(function (k) { return psp[k]; });
+  const sWms = vsechna.filter(function (x) { return x.prijemWms || x.vydejWms; });
+
+  Logger.log('PSP celkem: ' + vsechna.length + '   odbavených přes čtečku: ' + sWms.length);
+  Logger.log('');
+
+  const prijemBezR = sWms.filter(function (x) { return x.prijemWms && !x.R; });
+  const vydejBezS  = sWms.filter(function (x) { return x.vydejWms  && !x.S; });
+
+  Logger.log('--- Co o tom neví velká automatizace ---');
+  Logger.log('  příjem přes čtečku, ale PRÁZDNÉ R: ' + prijemBezR.length);
+  Logger.log('  výdej  přes čtečku, ale PRÁZDNÉ S: ' + vydejBezS.length);
+  Logger.log('');
+
+  // Důsledky: přeplánovaný svoz nebo upozornění AŽ PO příjmu
+  function datumy(text) {
+    const out = [];
+    String(text).split('/').forEach(function (cast) {
+      const t = cast.trim();
+      const m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (m) out.push(new Date(+m[3], +m[2] - 1, +m[1]));
+      else if (t) { const d = new Date(t); if (!isNaN(d)) out.push(d); }
+    });
+    return out;
+  }
+
+  const prepl = [], upoz = [], nesvez = [];
+  prijemBezR.forEach(function (x) {
+    const den = new Date(x.prijemWms.getFullYear(), x.prijemWms.getMonth(), x.prijemWms.getDate());
+    datumy(x.Q).forEach(function (q) { if (q > den) prepl.push(x.psp + ': příjem ' + formatCas_(den) + ' → nový svoz ' + formatCas_(q)); });
+    datumy(x.AI).forEach(function (a) { if (a > den) upoz.push(x.psp + ': příjem ' + formatCas_(den) + ' → upozorněno ' + formatCas_(a)); });
+    if (x.U) nesvez.push(x.psp);
+  });
+
+  Logger.log('--- Důsledky ---');
+  Logger.log('  nový termín svozu až PO příjmu přes čtečku: ' + prepl.length);
+  prepl.slice(0, 10).forEach(function (s) { Logger.log('     ' + s); });
+  Logger.log('  upozornění pobočce až PO příjmu přes čtečku: ' + upoz.length);
+  upoz.slice(0, 10).forEach(function (s) { Logger.log('     ' + s); });
+  Logger.log('  znovu zatržené Nesvezeno: ' + nesvez.length);
+  nesvez.slice(0, 10).forEach(function (s) { Logger.log('     ' + s); });
+
+  Logger.log('');
+  if (!prepl.length && !upoz.length && !nesvez.length) {
+    Logger.log('✓ Zatím žádný důsledek – robot nic nepřeplánoval ani nikoho neupozornil.');
+  } else {
+    Logger.log('⚠ Robot pracuje s tím, že tyhle PSP ještě nedorazily.');
+  }
+}
+
 // Zkontroluje, že ve sloupcích WMS jsou jen časy a že k nim sedí
 // zaškrtávátka. Čte se živá tabulka, takže výsledek není ovlivněný
 // žádnou stahovanou kopií.
