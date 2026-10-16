@@ -2313,6 +2313,61 @@ function zkontrolujFormatovani() {
   Logger.log('obarvuje to kód půjčovny – a ten se po zápisu ze skriptu nespustí.');
 }
 
+// Zkontroluje, že ve sloupcích WMS jsou jen časy a že k nim sedí
+// zaškrtávátka. Čte se živá tabulka, takže výsledek není ovlivněný
+// žádnou stahovanou kopií.
+function zkontrolujSloupceWMS() {
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+  const n = sheet.getLastRow() - 1;
+  if (n < 1) { Logger.log('Tabulka je prázdná.'); return; }
+
+  const prijem = sheet.getRange(2, wms.prijem, n, 1).getValues();
+  const vydej  = sheet.getRange(2, wms.vydej,  n, 1).getValues();
+  const t      = sheet.getRange(2, c.svezeno,  n, 1).getValues();
+  const v      = sheet.getRange(2, c.odeslano, n, 1).getValues();
+
+  let casP = 0, cizP = 0, casV = 0, cizV = 0;
+  const cizi = {};
+  const bezT = [], bezV = [];
+
+  for (let i = 0; i < n; i++) {
+    const p = prijem[i][0], d = vydej[i][0];
+    if (p !== '' && p !== null) {
+      if (p instanceof Date) { casP++; if (t[i][0] !== true) bezT.push(i + 2); }
+      else { cizP++; cizi[String(p)] = (cizi[String(p)] || 0) + 1; }
+    }
+    if (d !== '' && d !== null) {
+      if (d instanceof Date) { casV++; if (v[i][0] !== true) bezV.push(i + 2); }
+      else { cizV++; cizi[String(d)] = (cizi[String(d)] || 0) + 1; }
+    }
+  }
+
+  Logger.log('--- Sloupec "' + sheet.getRange(1, wms.prijem).getValue() + '" ---');
+  Logger.log('  skutečných časů: ' + casP + '   cizích hodnot: ' + cizP);
+  Logger.log('--- Sloupec "' + sheet.getRange(1, wms.vydej).getValue() + '" ---');
+  Logger.log('  skutečných časů: ' + casV + '   cizích hodnot: ' + cizV);
+
+  const klice = Object.keys(cizi);
+  if (klice.length) {
+    Logger.log('');
+    Logger.log('⚠ CIZÍ HODNOTY – do sloupců WMS píše něco dalšího:');
+    klice.sort(function (a, b) { return cizi[b] - cizi[a]; })
+         .slice(0, 10).forEach(function (k) { Logger.log('   ' + cizi[k] + '×  "' + k + '"'); });
+    Logger.log('   WMS bere jakoukoliv neprázdnou hodnotu jako "už odbaveno",');
+    Logger.log('   takže takové řádky skladník nemůže naskenovat.');
+  } else {
+    Logger.log('');
+    Logger.log('✓ Ve sloupcích WMS jsou jen časy.');
+  }
+
+  Logger.log('');
+  if (bezT.length) Logger.log('⚠ Čas příjmu bez zatrženého T – řádky: ' + bezT.slice(0, 20).join(', ') + (bezT.length > 20 ? ' …' : '') + '  (celkem ' + bezT.length + ')');
+  if (bezV.length) Logger.log('⚠ Čas výdeje bez zatrženého V – řádky: ' + bezV.slice(0, 20).join(', ') + (bezV.length > 20 ? ' …' : '') + '  (celkem ' + bezV.length + ')');
+  if (!bezT.length && !bezV.length) Logger.log('✓ Všude, kde je čas, sedí i zaškrtávátko.');
+}
+
 // Projde konkrétní PSP a řekne, co u něj WMS udělalo a co ne.
 // Spusťte, když se zapsal čas, ale nezatrhl se příznak nebo nezměnila barva.
 function procNezatrzeno() {
