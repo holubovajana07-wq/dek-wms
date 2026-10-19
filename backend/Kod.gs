@@ -82,6 +82,17 @@ function getSheetId_() {
   return id;
 }
 
+// Je v buňce skutečný zapsaný čas?
+//
+// Do sloupců WMS zapisuje ještě něco dalšího – k 19. 10. 2026 bylo
+// ve "WMS příjem" 53 cizích hodnot ("OK", "NENALEZENO"). Dokud se
+// nenajde, kdo je tam píše, nesmí nás mást: dřív stačila jakákoliv
+// neprázdná hodnota a řádek se tvářil jako odbavený, takže ho skladník
+// nemohl naskenovat.
+function jeCas_(hodnota) {
+  return hodnota instanceof Date;
+}
+
 function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('WMS_TOKEN') || '';
 }
@@ -499,8 +510,8 @@ function lookupStroj(id, akce) {
   // Vyber přesun, který odpovídá akci
   // Stav se pozná ze všech tří zdrojů naráz: čas od WMS, datum od druhé
   // automatizace i zaškrtávátko. Stačí jeden z nich.
-  function jePrijato(r)  { return !!(r.wmsPrijem || r.svezenoNaCS  || r.svezeno); }
-  function jeVydano(r)   { return !!(r.wmsVydej  || r.odeslanoZCS  || r.odeslano); }
+  function jePrijato(r)  { return !!(jeCas_(r.wmsPrijem) || r.svezenoNaCS  || r.svezeno); }
+  function jeVydano(r)   { return !!(jeCas_(r.wmsVydej)  || r.odeslanoZCS  || r.odeslano); }
 
   let hlavni = null;
   if (akce === 'prijem') {
@@ -536,11 +547,11 @@ function lookupStroj(id, akce) {
 
   if (hlavni.storno) {
     vysledek.varovani = 'POZOR: tento přesun je označen jako STORNO';
-  } else if (akce === 'prijem' && hlavni.wmsPrijem) {
+  } else if (akce === 'prijem' && jeCas_(hlavni.wmsPrijem)) {
     vysledek.varovani = 'Tento stroj už byl přijat ' + formatCas_(hlavni.wmsPrijem);
-  } else if (akce === 'vydej' && !hlavni.wmsPrijem && !hlavni.svezenoNaCS) {
+  } else if (akce === 'vydej' && !jeCas_(hlavni.wmsPrijem) && !hlavni.svezenoNaCS) {
     vysledek.varovani = 'Pozor: stroj nemá zapsaný příjem na CS2';
-  } else if (akce === 'vydej' && hlavni.wmsVydej) {
+  } else if (akce === 'vydej' && jeCas_(hlavni.wmsVydej)) {
     vysledek.varovani = 'Tento stroj už byl vydán ' + formatCas_(hlavni.wmsVydej);
   }
 
@@ -655,8 +666,8 @@ function getSeznamKVydeje(cerstve, celaTabulka) {
     // Stav se skládá ze tří zdrojů: čas od WMS, datum od druhé automatizace
     // a zaškrtávátko. Zaškrtávátka se dřív nečetla, takže se ve výdeji
     // objevovala PSP, která už měla V (Odesláno) zatržené.
-    const prijato = b(rB, wms.prijem) || a(rA, c.svezenoNaCS) || a(rA, c.svezeno);
-    const vydano  = b(rB, wms.vydej)  || a(rA, c.odeslanoZCS) || a(rA, c.odeslano);
+    const prijato = jeCas_(b(rB, wms.prijem)) || a(rA, c.svezenoNaCS) || a(rA, c.svezeno);
+    const vydano  = jeCas_(b(rB, wms.vydej))  || a(rA, c.odeslanoZCS) || a(rA, c.odeslano);
     if (!prijato || vydano) continue;
 
     const psp = (a(rA, c.cisloPsp) || '').toString().trim();
@@ -779,7 +790,7 @@ function getIndexPrijem(cerstve) {
     if (b(rB, c.storno)) continue;
     // Do indexu patří jen položky, které opravdu ještě nedorazily –
     // tedy ani čas od WMS, ani datum v R, ani zaškrtnuté T.
-    if (b(rB, wms.prijem)) continue;
+    if (jeCas_(b(rB, wms.prijem))) continue;
     if (a(rA, c.svezenoNaCS)) continue;
     if (a(rA, c.svezeno)) continue;
 
@@ -872,7 +883,7 @@ function najdiDalsiZPobocky_(b, hlavni, wms) {
       idStroje: id,
       nazev:    b.get(i, c.nazevPolozky),
       cisloPsp: b.get(i, c.cisloPsp),
-      prijato:  !!(b.get(i, wms.prijem) || b.get(i, c.svezenoNaCS)),
+      prijato:  !!(jeCas_(b.get(i, wms.prijem)) || b.get(i, c.svezenoNaCS)),
     });
   }
 
@@ -1026,8 +1037,10 @@ function hledejRadkyKZapisu_(sheet, odRadku, pocet, sloupec, hledanePsp, hledany
 
     if (i === 0) uOkraje = true;
 
+    // Jen skutečný čas znamená "už odbaveno". Cizí text ve sloupci
+    // (viz jeCas_) by jinak zablokoval zápis hláškou "už přijato".
     const stavajici = cilCol[i][0];
-    if (stavajici && !existujiciCas) existujiciCas = stavajici;
+    if (jeCas_(stavajici) && !existujiciCas) existujiciCas = stavajici;
     cileRadky.push(odRadku + i);
   }
 
