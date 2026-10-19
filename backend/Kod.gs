@@ -2189,8 +2189,10 @@ function dobarviStareZaznamy() {
   let zmen = 0;
   const kBarveni = [];
   for (let i = 0; i < n; i++) {
-    const odeslano = stavy[i][2] === true;
-    const svezeno  = stavy[i][0] === true;
+    // Rozhoduje čas NEBO zaškrtávátko. Dřív jen zaškrtávátko, takže
+    // řádek s doplněným časem výdeje, ale nezatrženým V, zůstal žlutý.
+    const odeslano = stavy[i][2] === true || jeCas_(wmsCasy[i][posunV]);
+    const svezeno  = stavy[i][0] === true || jeCas_(wmsCasy[i][posunP]);
     // Jen skutečný čas – ne "OK" a podobné ruční poznámky ve sloupci.
     const zapsalWms = jeCas_(wmsCasy[i][posunP]) || jeCas_(wmsCasy[i][posunV]);
     if (!zapsalWms) continue;
@@ -2473,8 +2475,13 @@ function dopocitejCasyZPohybu() {
   const colP    = sheet.getRange(2, wms.prijem, n, 1).getValues();
   const colV    = sheet.getRange(2, wms.vydej,  n, 1).getValues();
   const storno  = sheet.getRange(2, c.storno,   n, 1).getValues();
+  // Zaškrtávátka se doplňují spolu s časem. Dřív se doplnil jen čas
+  // a řádek zůstal nedobarvený, protože barvení se řídí zaškrtávátkem.
+  const flagT   = sheet.getRange(2, c.svezeno,   n, 1).getValues();
+  const flagU   = sheet.getRange(2, c.nesvezeno, n, 1).getValues();
+  const flagV   = sheet.getRange(2, c.odeslano,  n, 1).getValues();
 
-  let doplnP = 0, doplnV = 0;
+  let doplnP = 0, doplnV = 0, doplnFlag = 0;
   const ukazky = [];
   for (let i = 0; i < n; i++) {
     if (storno[i][0] === true) continue;
@@ -2489,22 +2496,33 @@ function dopocitejCasyZPohybu() {
       colV[i][0] = vydeje[psp]; doplnV++;
       if (ukazky.length < 15) ukazky.push('ř. ' + (i + 2) + '  ' + psp + '  výdej ← ' + formatCas_(vydeje[psp]));
     }
+
+    // Ke každému času musí sedět i příznak, jinak zůstane špatná barva
+    if (jeCas_(colP[i][0]) && flagT[i][0] !== true) { flagT[i][0] = true;  doplnFlag++; }
+    if (jeCas_(colP[i][0]) && flagU[i][0] === true) { flagU[i][0] = false; doplnFlag++; }
+    if (jeCas_(colV[i][0]) && flagV[i][0] !== true) { flagV[i][0] = true;  doplnFlag++; }
   }
 
   Logger.log('Chybějící časy, které jdou doplnit z POHYBY:');
   Logger.log('  příjem: ' + doplnP + '   výdej: ' + doplnV);
+  Logger.log('  k tomu zaškrtávátek k srovnání: ' + doplnFlag);
   Logger.log('');
   ukazky.forEach(function (s) { Logger.log('   ' + s); });
   if (doplnP + doplnV > ukazky.length) Logger.log('   … a další');
 
   Logger.log('');
-  if (!doplnP && !doplnV) { Logger.log('✓ Není co doplňovat.'); return; }
+  if (!doplnP && !doplnV && !doplnFlag) { Logger.log('✓ Není co doplňovat.'); return; }
 
   if (OPRAVDU_ZMENIT) {
     if (doplnP) sheet.getRange(2, wms.prijem, n, 1).setValues(colP);
     if (doplnV) sheet.getRange(2, wms.vydej,  n, 1).setValues(colV);
+    if (doplnFlag) {
+      sheet.getRange(2, c.svezeno,   n, 1).setValues(flagT);
+      sheet.getRange(2, c.nesvezeno, n, 1).setValues(flagU);
+      sheet.getRange(2, c.odeslano,  n, 1).setValues(flagV);
+    }
     SpreadsheetApp.flush();
-    Logger.log('Doplněno. Zaškrtávátka ani barvy to nemění – na to je dobarviStareZaznamy().');
+    Logger.log('Doplněno včetně zaškrtávátek. Barvy srovná dobarviStareZaznamy().');
   } else {
     Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
   }
@@ -2745,6 +2763,7 @@ function procNeobarveno() {
   Logger.log('');
   Logger.log('Stav:');
   Logger.log('  WMS příjem: ' + (sheet.getRange(RADEK, wms.prijem).getValue() || 'prázdné'));
+  Logger.log('  WMS výdej:  ' + (sheet.getRange(RADEK, wms.vydej).getValue()  || 'prázdné'));
   Logger.log('  T Svezeno:  ' + sheet.getRange(RADEK, c.svezeno).getValue());
   Logger.log('  U Nesvezeno:' + sheet.getRange(RADEK, c.nesvezeno).getValue());
   Logger.log('  V Odesláno: ' + sheet.getRange(RADEK, c.odeslano).getValue());
