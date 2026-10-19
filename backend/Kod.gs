@@ -2408,6 +2408,90 @@ function zkontrolujBarvy() {
     : 'Podmíněné formátování: žádné.');
 }
 
+// Dopočítá chybějící časy v DATA z auditního logu POHYBY.
+//
+// V provozu se stalo, že v POHYBY byl záznam o výdeji, ale ve sloupci
+// WMS výdej zůstalo prázdno. POHYBY je zápis, který se nikdy nepřepisuje,
+// takže se z něj dá pravda obnovit.
+//
+// Napoprvé jen vypíše, co by doplnil. Teprve po přepnutí OPRAVDU_ZMENIT
+// na true to zapíše.
+function dopocitejCasyZPohybu() {
+  const OPRAVDU_ZMENIT = false;
+
+  const ss = getSS_();
+  const log = ss.getSheetByName(WMS_CONFIG.pohybyList);
+  if (!log) { Logger.log('List POHYBY neexistuje.'); return; }
+
+  const sheet = getList_(WMS_CONFIG.dataList);
+  const wms   = wmsSloupce_(sheet);
+  const c     = WMS_CONFIG.col;
+
+  // 1) z POHYBY vytáhneme, kdy se co odbavilo
+  const nLog = log.getLastRow() - 1;
+  if (nLog < 1) { Logger.log('POHYBY je prázdný.'); return; }
+  const sirkaLog = log.getLastColumn();
+  const hl = log.getRange(1, 1, 1, sirkaLog).getValues()[0]
+    .map(function (h) { return String(h || '').trim().toLowerCase(); });
+  const iCas = hl.indexOf('čas'), iPsp = hl.indexOf('psp'), iAkce = hl.indexOf('akce');
+  if (iCas < 0 || iPsp < 0 || iAkce < 0) { Logger.log('POHYBY nemá sloupce Čas / PSP / Akce.'); return; }
+
+  const dataLog = log.getRange(2, 1, nLog, sirkaLog).getValues();
+  const prijmy = {}, vydeje = {};
+  for (let i = 0; i < nLog; i++) {
+    const psp = String(dataLog[i][iPsp] || '').trim().toUpperCase();
+    const cas = dataLog[i][iCas];
+    if (!psp || !(cas instanceof Date)) continue;
+    const akce = String(dataLog[i][iAkce] || '').toUpperCase();
+    // "PŘÍJEM na CS2" i "PŘÍJEM BEZ DOKLADU"
+    const cil = akce.indexOf('VÝDEJ') >= 0 ? vydeje : (akce.indexOf('PŘÍJEM') >= 0 ? prijmy : null);
+    if (!cil) continue;
+    if (!cil[psp] || cas > cil[psp]) cil[psp] = cas;   // nejnovější
+  }
+
+  // 2) projdeme DATA a najdeme, kde čas chybí
+  const n = sheet.getLastRow() - 1;
+  const pspCol  = sheet.getRange(2, c.cisloPsp, n, 1).getValues();
+  const colP    = sheet.getRange(2, wms.prijem, n, 1).getValues();
+  const colV    = sheet.getRange(2, wms.vydej,  n, 1).getValues();
+  const storno  = sheet.getRange(2, c.storno,   n, 1).getValues();
+
+  let doplnP = 0, doplnV = 0;
+  const ukazky = [];
+  for (let i = 0; i < n; i++) {
+    if (storno[i][0] === true) continue;
+    const psp = String(pspCol[i][0] || '').trim().toUpperCase();
+    if (!psp) continue;
+
+    if (prijmy[psp] && !jeCas_(colP[i][0])) {
+      colP[i][0] = prijmy[psp]; doplnP++;
+      if (ukazky.length < 15) ukazky.push('ř. ' + (i + 2) + '  ' + psp + '  příjem ← ' + formatCas_(prijmy[psp]));
+    }
+    if (vydeje[psp] && !jeCas_(colV[i][0])) {
+      colV[i][0] = vydeje[psp]; doplnV++;
+      if (ukazky.length < 15) ukazky.push('ř. ' + (i + 2) + '  ' + psp + '  výdej ← ' + formatCas_(vydeje[psp]));
+    }
+  }
+
+  Logger.log('Chybějící časy, které jdou doplnit z POHYBY:');
+  Logger.log('  příjem: ' + doplnP + '   výdej: ' + doplnV);
+  Logger.log('');
+  ukazky.forEach(function (s) { Logger.log('   ' + s); });
+  if (doplnP + doplnV > ukazky.length) Logger.log('   … a další');
+
+  Logger.log('');
+  if (!doplnP && !doplnV) { Logger.log('✓ Není co doplňovat.'); return; }
+
+  if (OPRAVDU_ZMENIT) {
+    if (doplnP) sheet.getRange(2, wms.prijem, n, 1).setValues(colP);
+    if (doplnV) sheet.getRange(2, wms.vydej,  n, 1).setValues(colV);
+    SpreadsheetApp.flush();
+    Logger.log('Doplněno. Zaškrtávátka ani barvy to nemění – na to je dobarviStareZaznamy().');
+  } else {
+    Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
+  }
+}
+
 // Najde rozpory mezi tím, co ví WMS, a tím, co vidí velká automatizace.
 //
 // WMS zapisuje do vlastních sloupců a do R/S schválně NESAHÁ – díky tomu
