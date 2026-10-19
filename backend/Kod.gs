@@ -1165,6 +1165,17 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     }
 
     zapsano += pocet;
+    // Přečteme čas zpátky. V provozu se objevily doklady, kde bylo
+    // zatržené V a záznam v POHYBY, ale sloupec s časem zůstal prázdný –
+    // tedy zápis se tvářil, že prošel, a neprošel. Dokud nevíme proč,
+    // ať to aspoň nikdy neprojde tiše.
+    const zpet = sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).getValues();
+    for (let k = 0; k < pocet; k++) {
+      if (!(zpet[k][0] instanceof Date)) {
+        throw new Error('Čas se nezapsal na řádek ' + (cileRadky[zacatek] + k)
+          + ' do sloupce ' + sloupec + '. Zápis neproběhl, zkuste to znovu.');
+      }
+    }
     zacatek = konec + 1;
   }
 
@@ -2524,12 +2535,30 @@ function zkontrolujSloupceWMS() {
   if (bezT.length) Logger.log('⚠ Čas příjmu bez zatrženého T – řádky: ' + bezT.slice(0, 20).join(', ') + (bezT.length > 20 ? ' …' : '') + '  (celkem ' + bezT.length + ')');
   if (bezV.length) Logger.log('⚠ Čas výdeje bez zatrženého V – řádky: ' + bezV.slice(0, 20).join(', ') + (bezV.length > 20 ? ' …' : '') + '  (celkem ' + bezV.length + ')');
   if (!bezT.length && !bezV.length) Logger.log('✓ Všude, kde je čas, sedí i zaškrtávátko.');
+
+  // Opačný případ – ten nás teď zajímá nejvíc: zatržené V bez času.
+  // Z našeho kódu vyjít nemá, čas se zapisuje dřív než příznak.
+  const opacne = [];
+  for (let i = 0; i < n; i++) {
+    if (v[i][0] === true && !(vydej[i][0] instanceof Date)) opacne.push(i + 2);
+  }
+  const opacneT = [];
+  for (let i = 0; i < n; i++) {
+    if (t[i][0] === true && !(prijem[i][0] instanceof Date)) opacneT.push(i + 2);
+  }
+  Logger.log('');
+  Logger.log('--- Zatržítko bez času (může být i od jiné automatizace) ---');
+  Logger.log('  V zatrženo, ale WMS výdej prázdný: ' + opacne.length
+    + (opacne.length ? '  → řádky ' + opacne.slice(0, 20).join(', ') + (opacne.length > 20 ? ' …' : '') : ''));
+  Logger.log('  T zatrženo, ale WMS příjem prázdný: ' + opacneT.length);
+  Logger.log('  (T/V plní i velká automatizace, takže samo o sobě to chyba být nemusí.');
+  Logger.log('   Chyba je, když je k tomu v POHYBY záznam z WMS.)');
 }
 
 // Projde konkrétní PSP a řekne, co u něj WMS udělalo a co ne.
 // Spusťte, když se zapsal čas, ale nezatrhl se příznak nebo nezměnila barva.
 function procNezatrzeno() {
-  const PSP = 'PSP-130-26-00126';   // ← sem číslo dokladu
+  const PSP = 'PSP-700-26-00521';   // ← sem číslo dokladu
 
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
