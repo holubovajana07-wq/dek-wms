@@ -2174,7 +2174,9 @@ function dobarviStareZaznamy() {
   const wms   = wmsSloupce_(sheet);
   const c     = WMS_CONFIG.col;
   const posledni = sheet.getLastRow();
-  const od = Math.max(2, posledni - 600);
+  // Projíždí se CELÝ list. Dřív jen posledních 600 řádků a doklady
+  // odbavené čtečkou dřív (třeba srpnové) se tím nikdy nedobarvily.
+  const od = 2;
   const n  = posledni - od + 1;
 
   const stavy  = sheet.getRange(od, c.svezeno, n, c.odeslano - c.svezeno + 1).getValues();
@@ -2185,10 +2187,12 @@ function dobarviStareZaznamy() {
   const pozadi = sheet.getRange(od, c.cisloPsp, n, 1).getBackgrounds();
 
   let zmen = 0;
+  const kBarveni = [];
   for (let i = 0; i < n; i++) {
     const odeslano = stavy[i][2] === true;
     const svezeno  = stavy[i][0] === true;
-    const zapsalWms = !!(wmsCasy[i][posunP] || wmsCasy[i][posunV]);
+    // Jen skutečný čas – ne "OK" a podobné ruční poznámky ve sloupci.
+    const zapsalWms = jeCas_(wmsCasy[i][posunP]) || jeCas_(wmsCasy[i][posunV]);
     if (!zapsalWms) continue;
 
     const maByt = odeslano ? WMS_CONFIG.barvaPoVydeji
@@ -2199,15 +2203,29 @@ function dobarviStareZaznamy() {
     if (ted === maByt) continue;
     if (WMS_CONFIG.barvyKPrepsani.indexOf(ted) < 0) continue;
 
-    Logger.log('řádek ' + (od + i) + ': ' + ted + ' → ' + maByt);
+    if (zmen < 30) Logger.log('řádek ' + (od + i) + ': ' + (ted || '(bez výplně)') + ' → ' + maByt);
     zmen++;
+    kBarveni.push({ radek: od + i, barva: maByt });
+  }
 
-    if (OPRAVDU_ZMENIT) {
-      sheet.getRange(od + i, 1, 1, sheet.getLastColumn()).setBackground(maByt);
+  if (OPRAVDU_ZMENIT && kBarveni.length) {
+    // Po jednom řádku by to na stovkách řádků doběhlo do limitu,
+    // tak se sousední řádky se stejnou barvou slučují do bloků.
+    const sirka = sheet.getLastColumn();
+    let z = 0;
+    while (z < kBarveni.length) {
+      let k = z;
+      while (k + 1 < kBarveni.length
+             && kBarveni[k + 1].radek === kBarveni[k].radek + 1
+             && kBarveni[k + 1].barva === kBarveni[z].barva) k++;
+      sheet.getRange(kBarveni[z].radek, 1, k - z + 1, sirka).setBackground(kBarveni[z].barva);
+      z = k + 1;
     }
+    SpreadsheetApp.flush();
   }
 
   Logger.log('');
+  if (zmen > 30) Logger.log('… a další (vypsáno prvních 30)');
   Logger.log(zmen ? 'K opravě: ' + zmen + ' řádků.' : 'Všechno sedí, není co opravovat.');
   if (zmen && !OPRAVDU_ZMENIT) {
     Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
