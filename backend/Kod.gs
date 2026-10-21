@@ -2196,8 +2196,10 @@ function zkontrolujPriznaky() {
 // Projde posledních 600 řádků a srovná barvu se stavem. Vypíše, co by
 // změnil; teprve po nastavení OPRAVDU_ZMENIT na true to skutečně udělá.
 function dobarviStareZaznamy() {
-  const OPRAVDU_ZMENIT = false;
+  dobarvi_(false);   // ručně = jen výpis, nic se nemění
+}
 
+function dobarvi_(OPRAVDU_ZMENIT) {
   const sheet = getList_(WMS_CONFIG.dataList);
   const wms   = wmsSloupce_(sheet);
   const c     = WMS_CONFIG.col;
@@ -2258,7 +2260,8 @@ function dobarviStareZaznamy() {
   if (zmen > 30) Logger.log('… a další (vypsáno prvních 30)');
   Logger.log(zmen ? 'K opravě: ' + zmen + ' řádků.' : 'Všechno sedí, není co opravovat.');
   if (zmen && !OPRAVDU_ZMENIT) {
-    Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
+    Logger.log('Zatím se nic nezměnilo – ruční spuštění jen vypisuje.');
+    Logger.log('Opravu provede udrzba(), kterou si dejte do časové spouště.');
   }
 }
 
@@ -2456,6 +2459,30 @@ function zkontrolujBarvy() {
     : 'Podmíněné formátování: žádné.');
 }
 
+// ============================================================
+// HODINOVÁ ÚDRŽBA – tohle patří do časové spouště
+// ============================================================
+// Srovná, co se při zápisu nepovedlo dotáhnout: doplní chybějící časy
+// z POHYBY, k nim zaškrtávátka, a nakonec dobarví řádky.
+//
+// Nastavení: Apps Script → ⏰ Spouště → Přidat spoušť
+//            funkce `udrzba`, časová, po hodině.
+//
+// Ručně spouštěné `dopocitejCasyZPohybu()` a `dobarviStareZaznamy()`
+// zůstávají jen na výpis a nic nemění – díky tomu nehrozí, že je někdo
+// omylem pustí naostro.
+function udrzba() {
+  Logger.log('=== ÚDRŽBA ' + formatCas_(new Date()) + ' ===');
+  Logger.log('');
+  Logger.log('--- 1. Časy a zaškrtávátka z POHYBY ---');
+  dopocitejCasy_(true);
+  Logger.log('');
+  Logger.log('--- 2. Barvy řádků ---');
+  dobarvi_(true);
+  Logger.log('');
+  Logger.log('=== Hotovo ===');
+}
+
 // Dopočítá chybějící časy v DATA z auditního logu POHYBY.
 //
 // V provozu se stalo, že v POHYBY byl záznam o výdeji, ale ve sloupci
@@ -2465,8 +2492,10 @@ function zkontrolujBarvy() {
 // Napoprvé jen vypíše, co by doplnil. Teprve po přepnutí OPRAVDU_ZMENIT
 // na true to zapíše.
 function dopocitejCasyZPohybu() {
-  const OPRAVDU_ZMENIT = false;
+  dopocitejCasy_(false);   // ručně = jen výpis, nic se nemění
+}
 
+function dopocitejCasy_(OPRAVDU_ZMENIT) {
   const ss = getSS_();
   const log = ss.getSheetByName(WMS_CONFIG.pohybyList);
   if (!log) { Logger.log('List POHYBY neexistuje.'); return; }
@@ -2550,9 +2579,10 @@ function dopocitejCasyZPohybu() {
       sheet.getRange(2, c.odeslano,  n, 1).setValues(flagV);
     }
     SpreadsheetApp.flush();
-    Logger.log('Doplněno včetně zaškrtávátek. Barvy srovná dobarviStareZaznamy().');
+    Logger.log('Doplněno včetně zaškrtávátek.');
   } else {
-    Logger.log('Zatím se nic nezměnilo. Pro provedení nastavte OPRAVDU_ZMENIT na true.');
+    Logger.log('Zatím se nic nezměnilo – ruční spuštění jen vypisuje.');
+    Logger.log('Opravu provede udrzba(), kterou si dejte do časové spouště.');
   }
 }
 
