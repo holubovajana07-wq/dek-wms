@@ -1141,6 +1141,45 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     if (sloupecPriznaku) {
       sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).setValues(priznaky);
     }
+
+    // Zápisy jsou do téhle chvíle jen rozepsané. Když se skript ukončí
+    // dřív, než je Google uloží, část projde a část ne – přesně to se dělo
+    // při výdeji víc dokladů naráz: čas zapsaný, zaškrtnutí ne, nebo naopak.
+    // Vynutíme uložení hned a hned si to i ověříme.
+    SpreadsheetApp.flush();
+
+    const casZpet = sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).getValues();
+    const flagZpet = sloupecPriznaku
+      ? sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).getValues()
+      : null;
+
+    let dopsat = false;
+    for (let k = 0; k < pocet; k++) {
+      if (!jeCas_(casZpet[k][0])) dopsat = true;
+      if (flagZpet && flagZpet[k][0] !== true) dopsat = true;
+    }
+
+    if (dopsat) {
+      // Jeden pokus navíc. Když ani ten neprojde, radši chyba než
+      // tichý polovičatý zápis, o kterém se nikdo nedozví.
+      sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).setValues(casy);
+      if (sloupecPriznaku) {
+        sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).setValues(priznaky);
+      }
+      SpreadsheetApp.flush();
+
+      const cas2 = sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).getValues();
+      const flag2 = sloupecPriznaku
+        ? sheet.getRange(cileRadky[zacatek], sloupecPriznaku, pocet, 1).getValues()
+        : null;
+      for (let k = 0; k < pocet; k++) {
+        if (!jeCas_(cas2[k][0]) || (flag2 && flag2[k][0] !== true)) {
+          throw new Error('Zápis na řádek ' + (cileRadky[zacatek] + k)
+            + ' se nepodařilo potvrdit ani na druhý pokus. Zkuste to prosím znovu.');
+        }
+      }
+      Logger.log('Zápis na řádku ' + cileRadky[zacatek] + ' musel být zopakován.');
+    }
     if (sloupecKeZruseni) {
       // Odškrtáváme jen tam, kde je opravdu zatrženo. Prázdná buňka zůstane
       // prázdná – zapsané FALSE by se v listu bez zaškrtávátka ukázalo textem.
@@ -1178,17 +1217,6 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
     }
 
     zapsano += pocet;
-    // Přečteme čas zpátky. V provozu se objevily doklady, kde bylo
-    // zatržené V a záznam v POHYBY, ale sloupec s časem zůstal prázdný –
-    // tedy zápis se tvářil, že prošel, a neprošel. Dokud nevíme proč,
-    // ať to aspoň nikdy neprojde tiše.
-    const zpet = sheet.getRange(cileRadky[zacatek], sloupec, pocet, 1).getValues();
-    for (let k = 0; k < pocet; k++) {
-      if (!(zpet[k][0] instanceof Date)) {
-        throw new Error('Čas se nezapsal na řádek ' + (cileRadky[zacatek] + k)
-          + ' do sloupce ' + sloupec + '. Zápis neproběhl, zkuste to znovu.');
-      }
-    }
     zacatek = konec + 1;
   }
 
