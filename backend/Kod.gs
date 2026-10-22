@@ -82,6 +82,25 @@ function getSheetId_() {
   return id;
 }
 
+// Zapíše řádek do listu WMS_LOG. Slouží k dohledání věcí, které se
+// dějí jen občas – protokol Apps Scriptu se po pár dnech ztratí,
+// tohle zůstane. Nikdy nesmí shodit samotný zápis, proto try/catch.
+function zapisDoLogu_(text) {
+  try {
+    const ss = getSS_();
+    let list = ss.getSheetByName('WMS_LOG');
+    if (!list) {
+      list = ss.insertSheet('WMS_LOG');
+      list.appendRow(['Čas', 'Co se stalo']);
+      list.getRange(1, 1, 1, 2).setFontWeight('bold');
+      list.setFrozenRows(1);
+      list.setColumnWidth(1, 160);
+      list.setColumnWidth(2, 600);
+    }
+    list.appendRow([new Date(), text]);
+  } catch (e) { /* log nikdy nesmí být důvod selhání zápisu */ }
+}
+
 // Je v buňce skutečný zapsaný čas?
 //
 // Do sloupců WMS zapisuje ještě něco dalšího – k 19. 10. 2026 bylo
@@ -323,7 +342,7 @@ function doGet(e) {
       });
 
     } else if (action === 'ping') {
-      result = { ok: true, verze: '4.6', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
+      result = { ok: true, verze: '4.8', list: WMS_CONFIG.dataList, cas: new Date().toISOString() };
 
     } else {
       result = { chyba: 'Neznámá akce: ' + action };
@@ -1179,6 +1198,8 @@ function zapisCas_(psp, idStroje, akce, cas, prepsat) {
         }
       }
       Logger.log('Zápis na řádku ' + cileRadky[zacatek] + ' musel být zopakován.');
+      zapisDoLogu_('Zápis zopakován – řádek ' + cileRadky[zacatek]
+        + ', PSP ' + hledanePsp + ', akce ' + akce);
     }
     if (sloupecKeZruseni) {
       // Odškrtáváme jen tam, kde je opravdu zatrženo. Prázdná buňka zůstane
@@ -2471,7 +2492,10 @@ function zkontrolujBarvy() {
 // Ručně spouštěné `dopocitejCasyZPohybu()` a `dobarviStareZaznamy()`
 // zůstávají jen na výpis a nic nemění – díky tomu nehrozí, že je někdo
 // omylem pustí naostro.
+let _udrzbaSrovnala = 0;
+
 function udrzba() {
+  _udrzbaSrovnala = 0;
   Logger.log('=== ÚDRŽBA ' + formatCas_(new Date()) + ' ===');
   Logger.log('');
   Logger.log('--- 1. Časy a zaškrtávátka z POHYBY ---');
@@ -2481,6 +2505,14 @@ function udrzba() {
   dobarvi_(true);
   Logger.log('');
   Logger.log('=== Hotovo ===');
+
+  // Když údržba něco opravuje opakovaně, znamená to, že to někdo nebo
+  // něco po zápisu zase rozhodí. Do logu, ať je to vidět zpětně.
+  if (_udrzbaSrovnala) {
+    zapisDoLogu_('Údržba srovnala ' + _udrzbaSrovnala + ' hodnot. '
+      + 'Opakuje-li se to, něco je po zápisu WMS mění.');
+    _udrzbaSrovnala = 0;
+  }
 }
 
 // Dopočítá chybějící časy v DATA z auditního logu POHYBY.
@@ -2579,6 +2611,7 @@ function dopocitejCasy_(OPRAVDU_ZMENIT) {
       sheet.getRange(2, c.odeslano,  n, 1).setValues(flagV);
     }
     SpreadsheetApp.flush();
+    _udrzbaSrovnala += doplnP + doplnV + doplnFlag;
     Logger.log('Doplněno včetně zaškrtávátek.');
   } else {
     Logger.log('Zatím se nic nezměnilo – ruční spuštění jen vypisuje.');
