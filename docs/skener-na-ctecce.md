@@ -121,21 +121,37 @@ poškrábané štítky. Navíc tím výrazně vydrží baterie.
 
 ## Co nás ještě potkalo
 
-### Jiná aplikace si skener přepne a nevrátí
+### Jiná aplikace skener zamkne a neodemkne
 
-Obsluha přepne do jiné aplikace (u nás Agenda), ta si nastaví **Intent output**,
-aby jí sken chodil přímo — a při odchodu ho **nevrátí zpátky**. Od té chvíle
-náš skener mlčí, dokud to někdo ručně nepřepne.
+**U nás to byla hlavní příčina opakovaných výpadků** (potvrzeno naším IT,
+11/2026). Firemní aplikace si skener **vypne** — `Scanner Input → Enable` —
+aby zabránila opakovanému naskenování téhož kódu. Jenže ten zámek je
+**na úrovni zařízení**, ne aplikace, takže platí i po přepnutí jinam.
 
-Webová stránka s tím nic nenadělá — k nastavení skeneru nemá přístup.
+Projev: skener přestane reagovat úplně. Nesvítí, nepípá, nic.
+
+**Oprava:** aplikace **Scanner** (modrá ikona) → `Scanner Input` → **Enable**
+zapnout.
+
+Pozor, je to **jiné místo než Output Mode**. Když skener svítí a čte, ale text
+nikam nejde, je to výstupní režim (viz výše). Když nereaguje vůbec, je to
+tenhle zámek.
+
+Příbuzný případ: aplikace si nastaví **Intent output** a nevrátí ho. Tam
+skener svítí a pípá, ale webová stránka nedostane znaky.
+
+Webová stránka s tím v obou případech nic nenadělá — k nastavení skeneru
+nemá přístup.
 
 Co s tím:
 - **Export Profile / Import Profile** ve ScanSettings: uložit si správné
-  nastavení do souboru, obnova je pak na dvě klepnutí místo cesty přes menu
+  nastavení do souboru, obnova je pak rychlejší než cesta přes menu
 - zeptat se dodavatele čtečky, jestli umí **vázat profil na aplikaci**
   (DT66 v menu neumí, ale u téhle třídy zařízení to bývá)
-- zeptat se dodavatele té druhé aplikace, ať si režim vrací — to je
-  jediná skutečná oprava
+- **zeptat se autorů té druhé aplikace, ať zámek po sobě uklidí** — při
+  odchodu z aplikace nebo při ztrátě popředí. Je to jediná skutečná oprava
+  a je na jejich straně: aplikace mění sdílené nastavení zařízení a nevrací
+  ho do původního stavu.
 
 ### Sken přichází useknutý nebo zpřeházený
 
@@ -155,7 +171,7 @@ rychleji než zhruba 50 ms na znak, skener ano.
 
 | Příznak | Kde hledat |
 |---|---|
-| Nesvítí, nepípá | Scanner Input → Enable; přiřazení spouště; restart čtečky |
+| Nesvítí, nepípá | **Scanner Input → Enable** (jiná aplikace ho mohla zamknout); přiřazení spouště; restart čtečky |
 | Svítí a pípá, v Chromu se nic nevypíše | **Output Mode → Keyboard output** |
 | V Chromu se vypíše, v aplikaci ne | zaměřené viditelné pole; `inputmode="none"`; běžící kamera |
 | Funguje, po přepnutí z jiné aplikace přestane | ta aplikace si přepsala Output Mode |

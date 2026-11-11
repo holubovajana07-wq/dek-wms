@@ -966,16 +966,20 @@
 
     <div id="napoveda-skener" style="display:none;margin-top:8px;">
       <div class="form-note" style="text-align:left;line-height:1.6;">
-        Stává se to po přepnutí z jiné aplikace — ta si skener nastaví pro sebe
-        a nevrátí ho zpátky. Oprava zabere půl minuty:
+        Stává se to po práci v Agendě — ta si skener zamkne, aby nešlo skenovat
+        dvakrát, a zámek platí i mimo ni. Oprava je na dvě klepnutí:
         <ol style="margin:8px 0 0;padding-left:20px;">
-          <li>Otevřít <strong>ScanSettings</strong> na ploše čtečky</li>
-          <li><strong>Output mode → Output Mode</strong></li>
-          <li>Přepnout na <strong>Keyboard output</strong></li>
-          <li>Zpět do aplikace a zkusit sken znovu</li>
+          <li>Otevřít <strong>Scanner</strong> — modrá ikona na ploše čtečky</li>
+          <li><strong>Scanner Input → Enable</strong> přepnout na zapnuto</li>
+          <li>Zpět sem a zmáčknout spoušť</li>
         </ol>
         <div style="margin-top:8px;">
-          Než to stihnete, jde doklad zadat <strong>koncem čísla</strong>
+          Pořád nic? Ve stejné aplikaci zkontrolujte
+          <strong>Output mode → Output Mode</strong>, má být
+          <strong>Keyboard output</strong>.
+        </div>
+        <div style="margin-top:8px;">
+          Než to vyřešíte, jde doklad zadat <strong>koncem čísla</strong>
           do pole níž — stačí poslední číslice.
         </div>
       </div>
@@ -1220,7 +1224,7 @@
 // Verze aplikace. Zvyšuje se při každé změně, která se nasazuje –
 // slouží k tomu, aby šlo na čtečce poznat, jestli má novou verzi.
 // Musí sedět s číslem, které vrací skript na ?action=ping.
-const VERZE_APP = '4.7';
+const VERZE_APP = '4.8';
 
 const state = {
   // Adresa z konfigurace.js má přednost. Když je vyplněná, na čtečce
