@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rotace – prioritní nakládka</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --cervena:#c0392b; --cervena-tma:#96251a;
+    --zelena:#2e7d32; --zluta:#f9a825;
+    --seda:#555; --ramecek:#ccc; --pozadi:#f4f4f4;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:17px;background:var(--pozadi);color:#111;
+  }
+  header{
+    background:var(--cervena);color:#fff;padding:12px 14px;
+    display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5;
+  }
+  header h1{font-size:18px;margin:0;flex:1;font-weight:700}
+  header .sklad{font-size:14px;opacity:.9}
+  main{padding:12px;padding-bottom:90px}
+  .karta{
+    background:#fff;border:1px solid var(--ramecek);border-radius:10px;
+    padding:14px;margin-bottom:12px;
+  }
+  .karta.prio{border-left:8px solid var(--cervena)}
+  .radek{display:flex;justify-content:space-between;gap:10px;margin:4px 0}
+  .popisek{color:var(--seda);font-size:14px}
+  .velke{font-size:30px;font-weight:800;letter-spacing:2px;font-family:ui-monospace,monospace}
+  .nazev{font-size:16px;margin:6px 0 2px}
+  .cas{font-weight:700}
+  .pozde{color:var(--cervena)}
+  button{
+    font-family:inherit;font-size:19px;font-weight:700;
+    padding:16px;width:100%;border:0;border-radius:10px;
+    background:var(--cervena);color:#fff;margin-top:10px;cursor:pointer;
+  }
+  button.vedlejsi{background:#fff;color:#333;border:2px solid var(--ramecek)}
+  button.zelene{background:var(--zelena)}
+  button:active{transform:translateY(1px)}
+  input{
+    font-family:inherit;font-size:24px;padding:14px;width:100%;
+    border:2px solid var(--ramecek);border-radius:10px;text-transform:uppercase;
+  }
+  input:focus{border-color:var(--cervena);outline:none}
+  .pruh{padding:14px;border-radius:10px;margin-bottom:12px;font-weight:600}
+  .pruh.chyba{background:#fdecea;color:#8d1c10;border:2px solid var(--cervena)}
+  .pruh.ok{background:#e8f5e9;color:#1b5e20;border:2px solid var(--zelena)}
+  .pruh.pozor{background:#fff8e1;color:#7a5600;border:2px solid var(--zluta)}
+  .prazdno{text-align:center;color:var(--seda);padding:40px 10px}
+  .spodek{
+    position:fixed;left:0;right:0;bottom:0;background:#fff;
+    border-top:1px solid var(--ramecek);padding:10px 12px;
+  }
+  .spodek button{margin:0}
+  .odznak{
+    display:inline-block;background:var(--cervena);color:#fff;
+    border-radius:20px;padding:2px 12px;font-size:13px;font-weight:700;
+  }
+  .skryty{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="nadpis">Prioritní nakládka</h1>
+  <span class="sklad" id="stitekSklad"></span>
+</header>
+
+<main id="obsah"></main>
+<div class="spodek skryty" id="spodek"></div>
+
+<script src="konfigurace.js"></script>
+<script>
+const VERZE = '1.0';
+
+let stav = {
+  url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
+  token: '',
+  sklad: 'S096',
+  polozky: [],
+  aktualni: null
+};
+
+// ---------- uložení na čtečce ----------
+function nactiUlozene(){
+  try{
+    stav.token = localStorage.getItem('rotace_token') || '';
+    stav.sklad = localStorage.getItem('rotace_sklad') || 'S096';
+    const ulozenaUrl = localStorage.getItem('rotace_url');
+    if(!stav.url && ulozenaUrl) stav.url = ulozenaUrl;
+  }catch(e){ /* zakázané úložiště – appka musí jet dál */ }
+}
+function uloz(klic, hodnota){
+  try{ localStorage.setItem(klic, hodnota); }catch(e){}
+}
+
+// ---------- komunikace ----------
+async function zavolej(akce, parametry){
+  const adresa = new URL(stav.url);
+  adresa.searchParams.set('action', akce);
+  adresa.searchParams.set('token', stav.token);
+  Object.keys(parametry || {}).forEach(k => adresa.searchParams.set(k, parametry[k]));
+
+  const odpoved = await fetch(adresa.toString(), { method:'GET' });
+  if(!odpoved.ok) throw new Error('Server vrátil ' + odpoved.status);
+
+  const data = await odpoved.json();
+  if(data.ok === false) throw new Error(data.chyba || 'Neznámá chyba');
+  return data;
+}
+
+// ---------- pomůcky ----------
+function h(text){
+  return String(text==null?'':text)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pruh(typ, text){
+  return '<div class="pruh '+typ+'">'+h(text)+'</div>';
+}
+function jePozde(nakladka){
+  const cas = new Date(String(nakladka).replace(' ','T'));
+  return !isNaN(cas) && cas < new Date();
+}
+
+// ---------- obrazovky ----------
+function obrazovkaNastaveni(zprava){
+  document.getElementById('nadpis').textContent = 'Nastavení';
+  document.getElementById('stitekSklad').textContent = '';
+  document.getElementById('spodek').classList.add('skryty');
+
+  document.getElementById('obsah').innerHTML =
+    (zprava ? pruh('chyba', zprava) : '') +
+    '<div class="karta">' +
+      '<div class="popisek">Adresa skriptu</div>' +
+      '<input id="poleUrl" value="'+h(stav.url)+'" placeholder="https://script.google.com/.../exec" style="font-size:15px;text-transform:none">' +
+      '<div class="popisek" style="margin-top:14px">Heslo (ROTACE_TOKEN)</div>' +
+      '<input id="poleToken" value="'+h(stav.token)+'" style="font-size:18px;text-transform:none">' +
+      '<div class="popisek" style="margin-top:14px">Sklad</div>' +
+      '<select id="poleSklad" style="font-size:19px;padding:14px;width:100%;border-radius:10px;border:2px solid var(--ramecek)">' +
+        '<option value="S096"'+(stav.sklad==='S096'?' selected':'')+'>S096 – CS2 Úžice</option>' +
+        '<option value="S093"'+(stav.sklad==='S093'?' selected':'')+'>S093 – CS1 Prostějov</option>' +
+      '</select>' +
+      '<button id="tlacitkoUloz">Uložit</button>' +
+    '</div>' +
+    '<div class="prazdno">verze ' + VERZE + '</div>';
+
+  document.getElementById('tlacitkoUloz').addEventListener('click', function(){
+    stav.url = document.getElementById('poleUrl').value.trim();
+    stav.token = document.getElementById('poleToken').value.trim();
+    stav.sklad = document.getElementById('poleSklad').value;
+    uloz('rotace_url', stav.url);
+    uloz('rotace_token', stav.token);
+    uloz('rotace_sklad', stav.sklad);
+    nactiSeznam();
+  });
+}
+
+async function nactiSeznam(zprava, typZpravy){
+  document.getElementById('nadpis').textContent = 'Prioritní nakládka';
+  document.getElementById('stitekSklad').textContent = stav.sklad;
+  document.getElementById('obsah').innerHTML = '<div class="prazdno">Načítám…</div>';
+  document.getElementById('spodek').classList.add('skryty');
+
+  if(!stav.url || !stav.token){ obrazovkaNastaveni(); return; }
+
+  try{
+    const data = await zavolej('seznam', { sklad: stav.sklad });
+    stav.polozky = data.polozky || [];
+    vykresliSeznam(zprava, typZpravy);
+  }catch(err){
+    document.getElementById('obsah').innerHTML =
+      pruh('chyba', err.message) +
+      '<button class="vedlejsi" onclick="nactiSeznam()">Zkusit znovu</button>' +
+      '<button class="vedlejsi" onclick="obrazovkaNastaveni()">Nastavení</button>';
+  }
+}
+
+function vykresliSeznam(zprava, typZpravy){
+  let html = zprava ? pruh(typZpravy || 'ok', zprava) : '';
+
+  if(!stav.polozky.length){
+    html += '<div class="prazdno">Žádná prioritní nakládka nečeká.</div>';
+  }else{
+    stav.polozky.forEach(function(p, index){
+      html +=
+        '<div class="karta prio" data-index="'+index+'">' +
+          '<div class="radek"><span class="odznak">PRIORITNÍ</span>' +
+          '<span class="cas'+(jePozde(p.nakladka)?' pozde':'')+'">'+h(p.nakladka)+'</span></div>' +
+          '<div class="velke">'+h(p.stroj)+'</div>' +
+          '<div class="nazev">'+h(p.nazev || p.psk)+'</div>' +
+          '<div class="radek"><span class="popisek">na pobočku</span><strong>'+h(p.pobocka)+'</strong></div>' +
+          '<div class="radek"><span class="popisek">lokace</span><strong>'+h(p.lokace || '—')+'</strong></div>' +
+          (p.naSklade ? '' : pruh('pozor','Tenhle kus není v zásobě – bude potřeba náhrada.')) +
+        '</div>';
+    });
+  }
+
+  html += '<button class="vedlejsi" onclick="nactiSeznam()">Načíst znovu</button>' +
+          '<button class="vedlejsi" onclick="obrazovkaNastaveni()">Nastavení</button>';
+
+  document.getElementById('obsah').innerHTML = html;
+
+  document.querySelectorAll('.karta.prio').forEach(function(karta){
+    karta.addEventListener('click', function(){
+      // zaměření musí proběhnout uvnitř doteku, jinak ho Android zahodí
+      otevriPolozku(Number(karta.getAttribute('data-index')), true);
+    });
+  });
+}
+
+function otevriPolozku(index, zDoteku){
+  const p = stav.polozky[index];
+  if(!p) return;
+  stav.aktualni = p;
+
+  document.getElementById('nadpis').textContent = 'Naložit ' + p.pobocka;
+  document.getElementById('obsah').innerHTML =
+    '<div class="karta prio">' +
+      '<div class="radek"><span class="popisek">naskenuj stroj</span>' +
+      '<span class="cas'+(jePozde(p.nakladka)?' pozde':'')+'">'+h(p.nakladka)+'</span></div>' +
+      '<div class="velke">'+h(p.stroj)+'</div>' +
+      '<div class="nazev">'+h(p.nazev || p.psk)+'</div>' +
+      '<div class="radek"><span class="popisek">lokace</span><strong>'+h(p.lokace || '—')+'</strong></div>' +
+    '</div>' +
+    '<div class="karta">' +
+      '<input id="poleSken" autocomplete="off" placeholder="sken stroje">' +
+      '<button id="tlacitkoPotvrd">Potvrdit naložení</button>' +
+      '<button class="vedlejsi" id="tlacitkoSkupina">Jiný kus ze skupiny</button>' +
+      '<button class="vedlejsi" id="tlacitkoNelze">Nelze vydat</button>' +
+      '<button class="vedlejsi" onclick="nactiSeznam()">Zpět</button>' +
+    '</div>';
+
+  const pole = document.getElementById('poleSken');
+  if(zDoteku) pole.focus();
+
+  // dotek kamkoliv vrátí zaměření, ať má sken kam spadnout
+  document.getElementById('obsah').addEventListener('touchstart', function(){
+    if(document.activeElement !== pole) pole.focus();
+  });
+
+  let budik = null;
+  let delka = 0;
+  pole.addEventListener('input', function(){
+    clearTimeout(budik);
+    const pribylo = pole.value.length - delka;
+    delka = pole.value.length;
+    // rychlý přírůstek = čtečka, ne člověk → odešli sám
+    if(pribylo > 1 || pole.value.length >= 4){
+      budik = setTimeout(odesliSken, 250);
+    }
+  });
+  pole.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); clearTimeout(budik); odesliSken(); }
+  });
+
+  document.getElementById('tlacitkoPotvrd').addEventListener('click', odesliSken);
+  document.getElementById('tlacitkoSkupina').addEventListener('click', ukazSkupinu);
+  document.getElementById('tlacitkoNelze').addEventListener('click', nelzeVydat);
+}
+
+async function odesliSken(){
+  const pole = document.getElementById('poleSken');
+  if(!pole) return;
+  const stroj = pole.value.trim().toUpperCase();
+  if(!stroj) return;
+
+  pole.disabled = true;
+  document.getElementById('spodek').classList.remove('skryty');
+  document.getElementById('spodek').innerHTML = '<button disabled>Ukládám…</button>';
+
+  try{
+    const data = await zavolej('vydej', { id: stav.aktualni.id, stroj: stroj });
+    obrazovkaPsp(data);
+  }catch(err){
+    pole.disabled = false;
+    pole.value = '';
+    document.getElementById('spodek').classList.add('skryty');
+    const obsah = document.getElementById('obsah');
+    obsah.insertAdjacentHTML('afterbegin', pruh('chyba', err.message));
+    pole.focus();
+  }
+}
+
+function obrazovkaPsp(vysledek){
+  document.getElementById('spodek').classList.add('skryty');
+  document.getElementById('nadpis').textContent = 'Vystavit PSP';
+
+  document.getElementById('obsah').innerHTML =
+    pruh('ok', 'Naloženo: ' + vysledek.stroj) +
+    (vysledek.nahrada ? pruh('pozor', 'Náhrada za ' + vysledek.pozadovany + ' – pobočce to oznámíme.') : '') +
+    '<div class="karta">' +
+      '<div class="popisek">Číslo PSP, které vystavilo SO</div>' +
+      '<input id="polePsp" placeholder="PSP-350-26-00412" style="font-size:19px">' +
+      '<button class="zelene" id="tlacitkoPsp">Uzavřít a odpovědět pobočce</button>' +
+      '<button class="vedlejsi" onclick="nactiSeznam(\'PSP se doplní později – řádek zůstal červený.\',\'pozor\')">PSP zatím nemám</button>' +
+    '</div>';
+
+  document.getElementById('tlacitkoPsp').addEventListener('click', async function(){
+    const psp = document.getElementById('polePsp').value.trim().toUpperCase();
+    if(!psp) return;
+    this.disabled = true;
+    this.textContent = 'Odesílám…';
+    try{
+      const data = await zavolej('psp', { id: stav.aktualni.id, psp: psp });
+      nactiSeznam('Hotovo. ' + (data.zprava || ''), 'ok');
+    }catch(err){
+      this.disabled = false;
+      this.textContent = 'Uzavřít a odpovědět pobočce';
+      document.getElementById('obsah').insertAdjacentHTML('afterbegin', pruh('chyba', err.message));
+    }
+  });
+}
+
+async function ukazSkupinu(){
+  const p = stav.aktualni;
+  document.getElementById('nadpis').textContent = 'Jiný kus';
+  document.getElementById('obsah').innerHTML = '<div class="prazdno">Načítám zásobu…</div>';
+
+  try{
+    const data = await zavolej('skupina', { psk: p.psk, sklad: p.sklad });
+    let html = pruh('pozor', 'Vyber jiný kus ze skupiny ' + p.psk + '. Pobočce se změna oznámí.');
+
+    if(!data.stroje.length){
+      html += '<div class="prazdno">Ze stejné skupiny nic na skladě neleží.</div>';
+    }else{
+      data.stroje.forEach(function(s){
+        html +=
+          '<div class="karta nahrada" data-stroj="'+h(s.stroj)+'">' +
+            '<div class="velke">'+h(s.stroj)+'</div>' +
+            '<div class="nazev">'+h(s.nazev)+'</div>' +
+            '<div class="radek"><span class="popisek">lokace</span><strong>'+h(s.lokace || '—')+'</strong></div>' +
+          '</div>';
+      });
+    }
+    html += '<button class="vedlejsi" id="zpetNaSken">Zpět na sken</button>';
+    document.getElementById('obsah').innerHTML = html;
+
+    document.querySelectorAll('.karta.nahrada').forEach(function(karta){
+      karta.addEventListener('click', function(){
+        const index = stav.polozky.indexOf(stav.aktualni);
+        otevriPolozku(index, true);
+        const pole = document.getElementById('poleSken');
+        pole.value = karta.getAttribute('data-stroj');
+        pole.focus();
+      });
+    });
+    document.getElementById('zpetNaSken').addEventListener('click', function(){
+      otevriPolozku(stav.polozky.indexOf(stav.aktualni), true);
+    });
+
+  }catch(err){
+    document.getElementById('obsah').innerHTML =
+      pruh('chyba', err.message) +
+      '<button class="vedlejsi" onclick="nactiSeznam()">Zpět</button>';
+  }
+}
+
+function nelzeVydat(){
+  document.getElementById('nadpis').textContent = 'Nelze vydat';
+  const duvody = [
+    'NA SKLADE NENI ZADNY KUS TETO SKUPINY',
+    'NESTIHLA SE NAKLADKA',
+    'STROJ JE POSKOZENY'
+  ];
+  let html = pruh('pozor', 'Vyber důvod. Pobočce odejde zpráva a požadavek se uzavře.');
+  duvody.forEach(function(d){
+    html += '<button class="vedlejsi duvod" data-duvod="'+h(d)+'">'+h(d)+'</button>';
+  });
+  html += '<button class="vedlejsi" onclick="otevriPolozku(stav.polozky.indexOf(stav.aktualni), true)">Zpět</button>';
+  document.getElementById('obsah').innerHTML = html;
+
+  document.querySelectorAll('.duvod').forEach(function(tlacitko){
+    tlacitko.addEventListener('click', async function(){
+      this.disabled = true;
+      try{
+        await zavolej('nesplneno', { id: stav.aktualni.id, duvod: this.getAttribute('data-duvod') });
+        nactiSeznam('Požadavek uzavřen jako nesplněný.', 'pozor');
+      }catch(err){
+        document.getElementById('obsah').insertAdjacentHTML('afterbegin', pruh('chyba', err.message));
+      }
+    });
+  });
+}
+
+// ---------- start ----------
+nactiUlozene();
+if(stav.url && stav.token) nactiSeznam(); else obrazovkaNastaveni();
+</script>
+</body>
+</html>

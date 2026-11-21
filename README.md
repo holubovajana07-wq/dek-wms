@@ -68,6 +68,11 @@ Přístupový token). Jinak se čtečka ke skriptu nedostane.
 
 ---
 
+## Nasazení na novou čtečku
+
+**Kompletní postup bod po bodu je v `docs/nova-ctecka-postup.md`.**
+Nepřeskakovat krok s profilem skeneru – bez něj bude skener čas od času mrtvý.
+
 ## Instalace na čtečku jako aplikace
 
 Aplikace je PWA – dá se nainstalovat na plochu a pak se chová jako běžná

@@ -1,0 +1,230 @@
+// ============================================================
+// Webová aplikace pro čtečku – prioritní nakládka.
+// Vlastní doGet, proto MUSÍ zůstat v samostatném projektu (ne ve WMS backendu
+// ani v Půjčovna_skript – tam už jeden doGet je a Google by jeden z nich zahodil).
+// ============================================================
+
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+
+  try {
+    if (p.action === 'ping') {
+      return json_({ ok: true, verze: '1.0', cas: new Date() });
+    }
+
+    overToken_(p.token);
+
+    switch (p.action) {
+      case 'seznam': return json_(apiSeznam_(p.sklad));
+      case 'skupina': return json_(apiSkupina_(p.psk, p.sklad));
+      case 'vydej': return json_(apiVydej_(p.id, p.stroj, p.uzivatel));
+      case 'psp': return json_(apiPsp_(p.id, p.psp));
+      case 'nesplneno': return json_(apiNesplneno_(p.id, p.duvod));
+      default: return json_({ ok: false, chyba: 'Neznámá akce: ' + (p.action || '') });
+    }
+  } catch (err) {
+    return json_({ ok: false, chyba: err.message });
+  }
+}
+
+function json_(objekt) {
+  return ContentService.createTextOutput(JSON.stringify(objekt))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function overToken_(token) {
+  const ocekavany = vlastnost_('ROTACE_TOKEN');
+  if (!ocekavany) throw new Error('Není nastavená vlastnost ROTACE_TOKEN.');
+  if (String(token || '') !== ocekavany) throw new Error('Neplatný token.');
+}
+
+/** Co čeká na naložení – řazeno podle času nakládky, nejbližší nahoře. */
+function apiSeznam_(sklad) {
+  const list = list_(LIST_ROTACE);
+  const posledni = list.getLastRow();
+  if (posledni < 2) return { ok: true, polozky: [] };
+
+  const kdeSklad = String(sklad || '').toUpperCase().trim();
+  const hodnoty = list.getRange(2, 1, posledni - 1, SL_POCET).getValues();
+  const zasoba = zasobaVse_();
+
+  const polozky = [];
+
+  hodnoty.forEach(radek => {
+    if (radek[SL.STAV - 1] !== STAV_K_VYDEJI) return;
+    if (kdeSklad && String(radek[SL.SKLAD - 1]).toUpperCase() !== kdeSklad) return;
+
+    const stroj = String(radek[SL.STROJ_POZ - 1]).toUpperCase();
+    const vZasobe = zasoba.filter(s => s.stroj === stroj)[0];
+
+    polozky.push({
+      id: radek[SL.ID - 1],
+      sklad: radek[SL.SKLAD - 1],
+      pobocka: radek[SL.POBOCKA - 1],
+      stroj: stroj,
+      psk: radek[SL.PSK - 1],
+      nazev: radek[SL.NAZEV - 1],
+      nakladka: String(radek[SL.NAKLADKA - 1]),
+      lokace: vZasobe ? vZasobe.lokace : '',
+      naSklade: vZasobe ? vZasobe.stav === ZASOBA_NA_SKLADE : false
+    });
+  });
+
+  polozky.sort((a, b) => String(a.nakladka).localeCompare(String(b.nakladka)));
+
+  return { ok: true, polozky: polozky };
+}
+
+/** Náhradní kusy ze stejné skupiny. */
+function apiSkupina_(psk, sklad) {
+  if (!psk) throw new Error('Chybí PSK.');
+
+  return {
+    ok: true,
+    stroje: zasobaSkupina_(psk, sklad).map(s => ({
+      stroj: s.stroj, nazev: s.nazev, lokace: s.lokace
+    }))
+  };
+}
+
+/** Skladník naskenoval stroj – zapíše se výdej. */
+function apiVydej_(id, stroj, uzivatel) {
+  if (!id) throw new Error('Chybí ID požadavku.');
+  if (!stroj) throw new Error('Chybí ID stroje.');
+
+  const zamek = LockService.getScriptLock();
+  if (!zamek.tryLock(15000)) throw new Error('Zkuste to prosím znovu, systém je zaneprázdněný.');
+
+  try {
+    const list = list_(LIST_ROTACE);
+    const radek = najdiRadekPozadavku_(id);
+    if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+
+    const stav = list.getRange(radek, SL.STAV).getValue();
+    if (stav === STAV_NALOZENO || stav === STAV_UZAVRENO) {
+      throw new Error('Tenhle požadavek už je odbavený (' + stav + ').');
+    }
+    if (stav === STAV_ZRUSENO) throw new Error('Požadavek byl stornovaný, nenakládat.');
+
+    const naskenovany = String(stroj).toUpperCase().trim();
+    const pozadovany = String(list.getRange(radek, SL.STROJ_POZ).getValue()).toUpperCase().trim();
+    const psk = String(list.getRange(radek, SL.PSK).getValue()).toUpperCase().trim();
+    const sklad = String(list.getRange(radek, SL.SKLAD).getValue()).toUpperCase().trim();
+
+    const vZasobe = zasobaNajdiStroj_(naskenovany);
+    if (!vZasobe) throw new Error('Stroj ' + naskenovany + ' není ve skladové zásobě.');
+    if (vZasobe.stav !== ZASOBA_NA_SKLADE) throw new Error('Stroj ' + naskenovany + ' je už vydaný.');
+    if (vZasobe.sklad !== sklad) throw new Error('Stroj ' + naskenovany + ' leží na ' + vZasobe.sklad + ', ne na ' + sklad + '.');
+
+    // Náhrada se smí vzít jen ze stejné skupiny.
+    if (naskenovany !== pozadovany && vZasobe.psk !== psk) {
+      throw new Error('Stroj ' + naskenovany + ' je jiná skupina (' + vZasobe.psk + '), požadovaná je ' + psk + '.');
+    }
+
+    list.getRange(radek, SL.STROJ_SKUT).setValue(naskenovany);
+    list.getRange(radek, SL.LOKACE).setValue(vZasobe.lokace);
+    list.getRange(radek, SL.VYDEJ).setValue(new Date());
+    list.getRange(radek, SL.STAV).setValue(STAV_NALOZENO);
+    if (naskenovany !== pozadovany) {
+      list.getRange(radek, SL.POZNAMKA).setValue('Náhrada za ' + pozadovany);
+    }
+    obarviRadek_(list, radek);
+
+    zasobaOznacVydano_(vZasobe.radek);
+
+    log_('VÝDEJ', id, 'OK', naskenovany + (naskenovany !== pozadovany ? ' (náhrada za ' + pozadovany + ')' : '') +
+      (uzivatel ? ', ' + uzivatel : ''));
+
+    return {
+      ok: true,
+      id: id,
+      stroj: naskenovany,
+      nahrada: naskenovany !== pozadovany,
+      pozadovany: pozadovany,
+      lokace: vZasobe.lokace,
+      zprava: 'Naloženo. Teď je potřeba vystavit PSP.'
+    };
+
+  } finally {
+    zamek.releaseLock();
+  }
+}
+
+/** SO vystavilo PSP – dopíše se, odejde odpověď a ticket se uzavře. */
+function apiPsp_(id, psp) {
+  if (!id) throw new Error('Chybí ID požadavku.');
+  if (!psp) throw new Error('Chybí číslo PSP.');
+
+  const list = list_(LIST_ROTACE);
+  const radek = najdiRadekPozadavku_(id);
+  if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+
+  const stav = list.getRange(radek, SL.STAV).getValue();
+  if (stav !== STAV_NALOZENO) throw new Error('Požadavek není ve stavu "naloženo" (je: ' + stav + ').');
+
+  const hodnoty = list.getRange(radek, 1, 1, SL_POCET).getValues()[0];
+
+  list.getRange(radek, SL.PSP).setValue(psp);
+  list.getRange(radek, SL.STAV).setValue(STAV_UZAVRENO);
+  list.getRange(radek, SL.UZAVRENO).setValue(new Date());
+  obarviRadek_(list, radek);
+
+  const vydej = hodnoty[SL.VYDEJ - 1];
+  const text =
+    '### ODPOVED ROTACE v1\n' +
+    'ID pozadavku: ' + id + '\n' +
+    'Stav: NALOZENO\n' +
+    'Nas klic: ' + id + '\n' +
+    'Sklad: ' + hodnoty[SL.SKLAD - 1] + '\n' +
+    'Pobocka: ' + hodnoty[SL.POBOCKA - 1] + '\n' +
+    'ID stroje pozadovane: ' + hodnoty[SL.STROJ_POZ - 1] + '\n' +
+    'ID stroje nalozene: ' + hodnoty[SL.STROJ_SKUT - 1] + '\n' +
+    'PSP: ' + psp + '\n' +
+    'Nalozeno: ' + (vydej ? formatDatumCas_(new Date(vydej)) : '') + '\n' +
+    '### KONEC';
+
+  const ticketId = hodnoty[SL.TICKET - 1];
+  let odpoved = 'bez ticketu';
+
+  if (ticketId) {
+    try {
+      const vysledekOdpovedi = rtOdpovez_(ticketId, text);
+      const vysledekUzavreni = rtUzavri_(ticketId);
+      odpoved = 'odpověď ' + vysledekOdpovedi.kod + ', uzavření ' + vysledekUzavreni.kod;
+    } catch (err) {
+      odpoved = 'CHYBA: ' + err.message;
+    }
+  }
+
+  log_('PSP A UZAVŘENÍ', id, 'OK', psp + ' | ' + odpoved);
+
+  return { ok: true, id: id, psp: psp, helpdesk: odpoved, zprava: 'Hotovo, pobočce odešla odpověď.' };
+}
+
+function apiNesplneno_(id, duvod) {
+  if (!id) throw new Error('Chybí ID požadavku.');
+
+  const list = list_(LIST_ROTACE);
+  const radek = najdiRadekPozadavku_(id);
+  if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+
+  list.getRange(radek, SL.STAV).setValue(STAV_NESPLNENO);
+  list.getRange(radek, SL.POZNAMKA).setValue(duvod || '');
+  list.getRange(radek, SL.UZAVRENO).setValue(new Date());
+  obarviRadek_(list, radek);
+
+  const ticketId = list.getRange(radek, SL.TICKET).getValue();
+  if (ticketId) {
+    const text =
+      '### ODPOVED ROTACE v1\n' +
+      'ID pozadavku: ' + id + '\n' +
+      'Stav: NESPLNENO\n' +
+      'Nas klic: ' + id + '\n' +
+      'Duvod: ' + (duvod || 'NEUVEDEN') + '\n' +
+      '### KONEC';
+    try { rtOdpovez_(ticketId, text); rtUzavri_(ticketId); } catch (err) { /* zapsáno níž */ }
+  }
+
+  log_('NESPLNĚNO', id, 'OK', duvod || '');
+  return { ok: true, id: id };
+}

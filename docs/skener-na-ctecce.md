@@ -143,11 +143,43 @@ skener svítí a pípá, ale webová stránka nedostane znaky.
 Webová stránka s tím v obou případech nic nenadělá — k nastavení skeneru
 nemá přístup.
 
-Co s tím:
+**✅ VYŘEŠENO (21. 11. 2026) – profil ScanWedge navázaný na aplikaci.**
+
+Urovo DT66 **profily umí**, jen nejsou v tom menu, kam se člověk dívá první.
+Aplikace, které se říká „Scanner“, je ve skutečnosti `com.ubx.datawedge`
+(Urovo ScanWedge, obdoba Zebra DataWedge). Profil se dá navázat na konkrétní
+aplikaci a ScanWedge ho nasadí pokaždé, když se do ní přepne – tedy i poté,
+co jiná aplikace skener zamkla.
+
+Stačí tenhle soubor:
+
+```xml
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<propertygroup>
+<profileName>WMS</profileName>
+<scanwedgeEnable>true</scanwedgeEnable>
+<profileEnable>true</profileEnable>
+<profilePackages packageName="com.android.chrome">*</profilePackages>
+<property id="0" name="SCANNER_ENABLE">1</property>
+</propertygroup>
+```
+
+nakopírovat do `/sdcard/enterprise/scanwedge/autoimport/` jako
+`WMS_scanner_property.xml`. Načte se sám do vteřiny, bez restartu.
+
+> Pro webovou aplikaci (PWA) je nutné vázat na **`com.android.chrome`**, ne na
+> balíček WebAPK – ten je v popředí jen při startu, pak běží Chrome. Důsledek:
+> profil platí pro **všechny** PWA na té čtečce. Když tam má někdo další svou
+> aplikaci, domluvte se s ním předem.
+
+Měřením ověřeno, že skener se po přepnutí do aplikace odemkne sám a výstupní
+režim (Keyboard) zůstane zachovaný. Podrobnosti, logy a nasazení na víc kusů:
+[[scanwedge-profily]].
+
+Další možnosti, když tahle cesta nevyjde:
 - **Export Profile / Import Profile** ve ScanSettings: uložit si správné
   nastavení do souboru, obnova je pak rychlejší než cesta přes menu
-- zeptat se dodavatele čtečky, jestli umí **vázat profil na aplikaci**
-  (DT66 v menu neumí, ale u téhle třídy zařízení to bývá)
+  (pozn.: export přes intent nám na DT66 nefungoval, soubor nevznikl)
 - **zeptat se autorů té druhé aplikace, ať zámek po sobě uklidí** — při
   odchodu z aplikace nebo při ztrátě popředí. Je to jediná skutečná oprava
   a je na jejich straně: aplikace mění sdílené nastavení zařízení a nevrací

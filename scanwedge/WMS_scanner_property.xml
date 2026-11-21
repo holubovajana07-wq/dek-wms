@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- Profil ScanWedge pro WMS. Vraci zapnuty skener, kdyz ho zamkne agendova
+     aplikace. Nasazeni: nakopirovat tento soubor do
+     /sdcard/enterprise/scanwedge/autoimport/ na cteckce - nacte se sam.
+     Postup a overeni: docs/scanwedge-profily.md -->
+<propertygroup>
+<profileName>WMS</profileName>
+<scanwedgeEnable>true</scanwedgeEnable>
+<profileEnable>true</profileEnable>
+<profilePackages packageName="com.android.chrome">*</profilePackages>
+<property id="0" name="SCANNER_ENABLE">1</property>
+</propertygroup>
