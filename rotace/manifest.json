@@ -1,0 +1,15 @@
+{
+  "name": "Rotace – prioritní nakládka",
+  "short_name": "Rotace",
+  "description": "Prioritní výdej strojů z centrálního skladu",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#c0392b",
+  "icons": [
+    { "src": "../icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

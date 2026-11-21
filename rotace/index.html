@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Rotace – prioritní nakládka</title>
-<link rel="icon" href="data:,">
+<!-- Vlastní manifest se scope "./" – aby se Rotace nainstalovala jako
+     SAMOSTATNÁ aplikace vedle DEK WMS, ne jako další okno téže. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#c0392b">
+<link rel="apple-touch-icon" href="../icon-192.png">
+<link rel="icon" href="../icon-192.png">
 <style>
   :root{
     --cervena:#c0392b; --cervena-tma:#96251a;
