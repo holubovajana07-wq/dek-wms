@@ -123,6 +123,36 @@ Zkopírovat adresu, která končí `/exec`.
 > si jeho adresu zatím nepamatuje. (U `WMS backend` to pořád platí: tam jen
 > **Verze: Nová**, jinak se čtečkám rozbije spojení.)
 
+### ⚠ Otevřený editor přepíše nahraný kód
+
+Když je v prohlížeči **otevřená karta s editorem Apps Scriptu** a mezitím se
+kód nahraje přes `clasp push`, editor si pořád drží svou starší kopii –
+a při první akci ji uloží zpátky. Nově přidané soubory přitom **zmizí**.
+
+Stalo se to 21. 11. 2026: zmizel `32-naskladneni.js` a `50-setup.js` se vrátil
+o verzi zpět. Pozná se to tak, že funkce vypíše hlášku ze starého kódu.
+
+**Pravidlo: po každém `clasp push` dát v editoru F5**, než se tam cokoli spustí.
+Když si nejsi jistá, co na serveru je, dá se to zkontrolovat stažením do
+prázdné složky:
+
+```powershell
+clasp clone 1CCD6VLK1s2B9EeBdqkCmB8eK7o_JvHnr-93JN7Q-YxMLnynsmZrwAOct
+```
+
+### ⚠ Po KAŽDÉ změně kódu znovu nasadit
+
+**Apps Script posílá do webové aplikace tu verzi kódu, se kterou bylo nasazení
+vytvořeno.** `clasp push` nahraje kód do editoru, ale webová aplikace dál běží
+po starém, dokud se nasazení neaktualizuje.
+
+Pozná se to podle hlášek, které v aktuálním kódu vůbec nejsou –
+třeba `Není nastavená vlastnost ROTACE_TOKEN` z dávno smazané funkce.
+
+**Nasadit → Spravovat nasazení → ⚙ (tužka) → Verze: Nová → Nasadit.**
+
+Adresa zůstane stejná, v `konfigurace.js` se nic nemění.
+
 ### 5. Vložit adresu do stránky
 
 Do `rotace/konfigurace.js` vyplnit `ROTACE_URL = 'https://script.google.com/.../exec';`,
@@ -161,6 +191,26 @@ Pět chybných PINů = pauza 5 minut.
 
 PIN se do čtečky nikdy neposílá – ověřuje se na serveru a zpátky jde jen
 podepsaný klíč, ve kterém je jméno, sklad a platnost.
+
+### Seznam se obnovuje sám
+
+Skladník nemusí na nic klikat. Na obrazovce se seznamem se **každých 30 vteřin**
+načte znovu, a když se čtečka vrátí z pozadí (odemknutí), načte se hned.
+
+Když **přibude nová nakládka**, čtečka **pípne a zavibruje** a nahoře se objeví
+pruh „Přibyla nová nakládka".
+
+Obnovování běží **jen na seznamu**. Jakmile skladník otevře konkrétní nakládku,
+skenuje nebo zadává PSP, obnovování se zastaví – jinak by mu seznam přepsal
+rozdělanou práci. Po návratu na seznam se zase rozběhne.
+
+Výpadek wifi při tichém obnovení se nehlásí, zkusí se to za půl minuty znovu.
+
+> **Skutečné notifikace** (upozornění, když je aplikace zavřená) webová stránka
+> na Androidu neumí bez push serveru. Dokud je Rotace webová aplikace, platí:
+> **musí být otevřená**. Proto je rozumné nechat čtečku na téhle obrazovce.
+> Notifikace by uměl až nativní obal – viz `docs/scanwedge-profily.md`,
+> kapitola o tom, proč jsme obal nakonec nepotřebovali kvůli skeneru.
 
 > Skener si poradí sám, pokud je na čtečce nahraný profil `WMS` –
 > ten se váže na Chrome, takže platí i pro tuhle stránku.

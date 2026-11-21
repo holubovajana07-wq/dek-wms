@@ -90,7 +90,7 @@
 
 <script src="konfigurace.js"></script>
 <script>
-const VERZE = '2.0';
+const VERZE = '2.1';
 
 let stav = {
   url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
@@ -158,9 +158,52 @@ function jePozde(nakladka){
 
 // ---------- obrazovky ----------
 function hlavicka(nadpis, stitek){
+  // Každá obrazovka projde tudy, takže je to správné místo, kde zastavit
+  // samočinné obnovování – jinak by seznam přepsal rozdělanou práci.
+  zastavObnovu();
   document.getElementById('nadpis').textContent = nadpis;
   document.getElementById('stitekSklad').textContent = stitek || '';
   document.getElementById('spodek').classList.add('skryty');
+}
+
+// ---------- samočinné obnovování seznamu ----------
+// Skladník nemá na co klikat. Seznam se obnovuje sám, a když přibude nový
+// požadavek, čtečka pípne a zavibruje – ať si toho všimne i přes rameno.
+
+const OBNOVA_SEKUND = 30;
+let casovacObnovy = null;
+let znameId = null;        // null = ještě jsme nic neviděli, nepípat
+
+function spustObnovu(){
+  zastavObnovu();
+  casovacObnovy = setInterval(function(){
+    if(document.hidden) return;         // na pozadí nemá smysl se ptát
+    nactiSeznam(null, null, true);      // tiché obnovení
+  }, OBNOVA_SEKUND * 1000);
+}
+function zastavObnovu(){
+  if(casovacObnovy){ clearInterval(casovacObnovy); casovacObnovy = null; }
+}
+
+// Návrat z pozadí (skladník zamkl a odemkl čtečku) = načíst hned,
+// ne čekat na další kolo.
+document.addEventListener('visibilitychange', function(){
+  if(!document.hidden && casovacObnovy) nactiSeznam(null, null, true);
+});
+
+function upozorni(){
+  try{
+    const zvuk = new (window.AudioContext || window.webkitAudioContext)();
+    const tón = zvuk.createOscillator();
+    const hlasitost = zvuk.createGain();
+    tón.connect(hlasitost); hlasitost.connect(zvuk.destination);
+    tón.frequency.value = 880;
+    hlasitost.gain.setValueAtTime(0.25, zvuk.currentTime);
+    hlasitost.gain.exponentialRampToValueAtTime(0.001, zvuk.currentTime + 0.5);
+    tón.start(); tón.stop(zvuk.currentTime + 0.5);
+  }catch(e){ /* zvuk není povinný */ }
+
+  try{ if(navigator.vibrate) navigator.vibrate([200, 100, 200]); }catch(e){}
 }
 
 function obrazovkaNastaveni(zprava){
@@ -304,9 +347,11 @@ function obrazovkaPin(jmeno, sklad){
   vykresli();
 }
 
-async function nactiSeznam(zprava, typZpravy){
-  hlavicka('Prioritní nakládka', stav.sklad);
-  document.getElementById('obsah').innerHTML = '<div class="prazdno">Načítám…</div>';
+async function nactiSeznam(zprava, typZpravy, tiche){
+  if(!tiche){
+    hlavicka('Prioritní nakládka', stav.sklad);
+    document.getElementById('obsah').innerHTML = '<div class="prazdno">Načítám…</div>';
+  }
 
   if(!stav.url){ obrazovkaNastaveni(); return; }
   if(!prihlasen()){ obrazovkaSklad(stav.klic ? 'Přihlášení vypršelo, přihlas se znovu.' : ''); return; }
@@ -319,6 +364,9 @@ async function nactiSeznam(zprava, typZpravy){
     // Vypršelý nebo neplatný klíč = zpátky na přihlášení, ne hláška do prázdna.
     if(/ihlá|ihlas/.test(err.message)){ odhlas(); return; }
 
+    // Tiché obnovení chybu nehlásí – výpadek wifi se spraví sám při dalším kole.
+    if(tiche) return;
+
     document.getElementById('obsah').innerHTML =
       pruh('chyba', err.message) +
       '<button class="vedlejsi" onclick="nactiSeznam()">Zkusit znovu</button>' +
@@ -327,7 +375,17 @@ async function nactiSeznam(zprava, typZpravy){
 }
 
 function vykresliSeznam(zprava, typZpravy){
+  // Přibyl nový požadavek od minule? Pak pípnout a zavibrovat.
+  const ted = new Set(stav.polozky.map(function(p){ return p.id; }));
+  let nove = 0;
+  if(znameId){
+    ted.forEach(function(id){ if(!znameId.has(id)) nove++; });
+  }
+  znameId = ted;
+  if(nove) upozorni();
+
   let html = zprava ? pruh(typZpravy || 'ok', zprava) : '';
+  if(nove) html += pruh('pozor', nove === 1 ? 'Přibyla nová nakládka.' : 'Přibyly nové nakládky: ' + nove);
 
   if(!stav.polozky.length){
     html += '<div class="prazdno">Žádná prioritní nakládka nečeká.</div>';
@@ -346,11 +404,17 @@ function vykresliSeznam(zprava, typZpravy){
     });
   }
 
-  html += '<button class="vedlejsi" onclick="nactiSeznam()">Načíst znovu</button>' +
-          '<div class="prazdno">' + h(stav.jmeno) + ' · ' + h(stav.nazevSkladu || stav.sklad) + '</div>' +
+  const cas = new Date();
+  const hhmm = ('0'+cas.getHours()).slice(-2) + ':' + ('0'+cas.getMinutes()).slice(-2);
+
+  html += '<div class="prazdno">obnovuje se samo · naposledy ' + hhmm + '<br>' +
+            h(stav.jmeno) + ' · ' + h(stav.nazevSkladu || stav.sklad) + '</div>' +
           '<button class="vedlejsi" onclick="odhlas()">Odhlásit</button>';
 
   document.getElementById('obsah').innerHTML = html;
+
+  // Seznam je na obrazovce → od téhle chvíle se obnovuje sám.
+  spustObnovu();
 
   document.querySelectorAll('.karta.prio').forEach(function(karta){
     karta.addEventListener('click', function(){
@@ -365,7 +429,7 @@ function otevriPolozku(index, zDoteku){
   if(!p) return;
   stav.aktualni = p;
 
-  document.getElementById('nadpis').textContent = 'Naložit ' + p.pobocka;
+  hlavicka('Naložit ' + p.pobocka, stav.sklad);   // zastaví i samočinné obnovování
   document.getElementById('obsah').innerHTML =
     '<div class="karta prio">' +
       '<div class="radek"><span class="popisek">naskenuj stroj</span>' +
@@ -434,8 +498,7 @@ async function odesliSken(){
 }
 
 function obrazovkaPsp(vysledek){
-  document.getElementById('spodek').classList.add('skryty');
-  document.getElementById('nadpis').textContent = 'Vystavit PSP';
+  hlavicka('Vystavit PSP', stav.sklad);
 
   document.getElementById('obsah').innerHTML =
     pruh('ok', 'Naloženo: ' + vysledek.stroj) +
@@ -465,7 +528,7 @@ function obrazovkaPsp(vysledek){
 
 async function ukazSkupinu(){
   const p = stav.aktualni;
-  document.getElementById('nadpis').textContent = 'Jiný kus';
+  hlavicka('Jiný kus', stav.sklad);
   document.getElementById('obsah').innerHTML = '<div class="prazdno">Načítám zásobu…</div>';
 
   try{
@@ -508,7 +571,7 @@ async function ukazSkupinu(){
 }
 
 function nelzeVydat(){
-  document.getElementById('nadpis').textContent = 'Nelze vydat';
+  hlavicka('Nelze vydat', stav.sklad);
   const duvody = [
     'NA SKLADE NENI ZADNY KUS TETO SKUPINY',
     'NESTIHLA SE NAKLADKA',

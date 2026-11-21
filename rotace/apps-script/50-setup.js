@@ -122,22 +122,40 @@ function zacniTed() {
 // Jedno kolečko je ~2 s (jeden dotaz na helpdesk), takže 1440 běhů ≈ 48 minut.
 // Vejde se, ale není kam růst – kdyby se limit začal vyčerpávat,
 // přepnout na nastavSpoustUsporna().
+const SPOUSTE = ['nactiPozadavky', 'naskladniZPohybu', 'prekontrolujDostupnost'];
+
 function nastavSpoust() {
   zrusSpoust();
+
+  // Požadavky z helpu – co nejrychleji, aby nic neuklouzlo.
   ScriptApp.newTrigger('nactiPozadavky').timeBased().everyMinutes(1).create();
-  Logger.log('Spoušť nastavená: nactiPozadavky každou minutu.');
+
+  // Naskladnění z POHYBY – stroj, co přijel na CS, se objeví v zásobě.
+  // Nemusí být tak hbité jako požadavky, deset minut bohatě stačí.
+  ScriptApp.newTrigger('naskladniZPohybu').timeBased().everyMinutes(10).create();
+
+  // Přepočet dostupnosti – zásoba se mění, požadavky čekající na výdej
+  // se znovu porovnají se skladem.
+  ScriptApp.newTrigger('prekontrolujDostupnost').timeBased().everyHours(1).create();
+
+  Logger.log('Spouště nastavené:\n' +
+    '  nactiPozadavky – každou minutu\n' +
+    '  naskladniZPohybu – každých 10 minut\n' +
+    '  prekontrolujDostupnost – každou hodinu');
 }
 
 /** Šetrnější varianta, když by docházel denní limit spouští. */
 function nastavSpoustUsporna() {
   zrusSpoust();
   ScriptApp.newTrigger('nactiPozadavky').timeBased().everyMinutes(5).create();
-  Logger.log('Spoušť nastavená: nactiPozadavky každých 5 minut.');
+  ScriptApp.newTrigger('naskladniZPohybu').timeBased().everyMinutes(30).create();
+  ScriptApp.newTrigger('prekontrolujDostupnost').timeBased().everyHours(4).create();
+  Logger.log('Spouště nastavené v úsporném režimu (5 / 30 / 240 minut).');
 }
 
 function zrusSpoust() {
   ScriptApp.getProjectTriggers().forEach(spoust => {
-    if (spoust.getHandlerFunction() === 'nactiPozadavky') ScriptApp.deleteTrigger(spoust);
+    if (SPOUSTE.indexOf(spoust.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(spoust);
   });
 }
 
@@ -177,9 +195,10 @@ function kontrolaNastaveni() {
     zpravy.push('❌ Tabulka: ' + err.message);
   }
 
-  const spousti = ScriptApp.getProjectTriggers()
-    .filter(s => s.getHandlerFunction() === 'nactiPozadavky').length;
-  zpravy.push('Spoušť nactiPozadavky: ' + (spousti ? 'běží' : '❌ není'));
+  const bezici = ScriptApp.getProjectTriggers().map(s => s.getHandlerFunction());
+  SPOUSTE.forEach(nazev => {
+    zpravy.push('Spoušť ' + nazev + ': ' + (bezici.indexOf(nazev) !== -1 ? 'běží' : '❌ není'));
+  });
 
   Logger.log(zpravy.join('\n'));
   return zpravy.join('\n');
