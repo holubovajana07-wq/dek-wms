@@ -254,6 +254,18 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 | Po skenu | řádek zčervená, stav `naloženo (čeká PSP)`, stroj v `ZASOBA_CS` je `vydáno` |
 | Po zadání PSP | řádek zezelená, stav `uzavřeno`, ticket v helpdesku `resolved` |
 
+### PSP jde dopsat i přímo do tabulky
+
+PSP vystavuje SO, ne skladník – číslo se tedy často dozví někdo jiný, než kdo
+stroj nakládal. Proto nemusí jít přes čtečku:
+
+**Stačí číslo napsat do sloupce `PSP` u červeného řádku a nechat být.**
+Do minuty robot sám odešle pobočce odpověď `NALOZENO`, uzavře ticket
+a řádek zezelená.
+
+Na čtečce je proto u naloženého stroje tlačítko **„PSP zatím nemám"** –
+řádek zůstane červený, dokud číslo nepřibude (na čtečce nebo v tabulce).
+
 ### Barvy v listu `ROTACE`
 
 **Řádek** drží barvu podle stavu:

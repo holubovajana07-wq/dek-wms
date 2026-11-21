@@ -139,6 +139,10 @@ function nactiPozadavky() {
     nastavControl_('POSLEDNI_KONTROLA', formatDatumCas_(ted));
     ulozVidene_(videne);
 
+    // Při stejném kolečku se podíváme i na to, jestli někdo nedopsal PSP
+    // do tabulky – pak odejde odpověď pobočce a ticket se uzavře.
+    try { dokonciPodlePsp(); } catch (err) { log_('DOKONČENÍ PODLE PSP', '', 'CHYBA', err.message); }
+
     if (zapsano || chyb) {
       log_('SOUHRN', '', 'OK', 'zapsáno: ' + zapsano + ', přeskočeno: ' + preskoceno + ', chyb: ' + chyb);
     }

@@ -180,10 +180,26 @@ function apiPsp_(id, psp, kdo) {
 
   overSklad_(list, radek, kdo);
 
+  const vysledek = uzavriSPsp_(list, radek, psp, kdo.jmeno);
+  return { ok: true, id: id, psp: psp, helpdesk: vysledek.helpdesk,
+           zprava: 'Hotovo, pobočce odešla odpověď.' };
+}
+
+/**
+ * Dopsání PSP, odpověď pobočce a uzavření ticketu.
+ *
+ * Volá se ze dvou míst – ze čtečky (apiPsp_) a z hlídání tabulky
+ * (dokonciPodlePsp), protože PSP vystavuje SO a číslo se často dopisuje
+ * rovnou do tabulky, ne na čtečce.
+ */
+function uzavriSPsp_(list, radek, psp, kdoText) {
   const stav = list.getRange(radek, SL.STAV).getValue();
-  if (stav !== STAV_NALOZENO) throw new Error('Požadavek není ve stavu "naloženo" (je: ' + stav + ').');
+  if (stav !== STAV_NALOZENO) {
+    throw new Error('Požadavek není ve stavu „naloženo" (je: ' + stav + ').');
+  }
 
   const hodnoty = list.getRange(radek, 1, 1, SL_POCET).getValues()[0];
+  const id = hodnoty[SL.ID - 1];
 
   list.getRange(radek, SL.PSP).setValue(psp);
   list.getRange(radek, SL.STAV).setValue(STAV_UZAVRENO);
@@ -212,15 +228,45 @@ function apiPsp_(id, psp, kdo) {
     try {
       const vysledekOdpovedi = rtOdpovez_(ticketId, text);
       const vysledekUzavreni = rtUzavri_(ticketId);
-      odpoved = 'odpověď ' + vysledekOdpovedi.kod + ', uzavření ' + vysledekUzavreni.kod;
+      const ok = rtStavOdpovedi_(vysledekOdpovedi.text) === 200;
+      odpoved = (ok ? 'odpověď OK' : 'odpověď CHYBA') +
+        ', uzavření ' + rtStavOdpovedi_(vysledekUzavreni.text);
     } catch (err) {
       odpoved = 'CHYBA: ' + err.message;
     }
   }
 
-  log_('PSP A UZAVŘENÍ', id, 'OK', psp + ' | ' + odpoved + ' | ' + kdo.jmeno);
+  log_('PSP A UZAVŘENÍ', id, 'OK', psp + ' | ' + odpoved + ' | ' + (kdoText || ''));
 
-  return { ok: true, id: id, psp: psp, helpdesk: odpoved, zprava: 'Hotovo, pobočce odešla odpověď.' };
+  return { helpdesk: odpoved };
+}
+
+/**
+ * Hlídá tabulku: kde je stav „naloženo (čeká PSP)" a někdo dopsal číslo PSP,
+ * odejde odpověď pobočce a ticket se uzavře.
+ *
+ * Běží jako součást minutové kontroly, takže se nemusí nic mačkat –
+ * stačí číslo PSP napsat do sloupce PSP a nechat být.
+ */
+function dokonciPodlePsp() {
+  const list = list_(LIST_ROTACE);
+  const posledni = list.getLastRow();
+  if (posledni < 2) return;
+
+  const hodnoty = list.getRange(2, 1, posledni - 1, SL_POCET).getValues();
+
+  hodnoty.forEach((radek, index) => {
+    if (radek[SL.STAV - 1] !== STAV_NALOZENO) return;
+
+    const psp = String(radek[SL.PSP - 1] || '').trim();
+    if (!psp) return;
+
+    try {
+      uzavriSPsp_(list, index + 2, psp, 'dopsáno v tabulce');
+    } catch (err) {
+      log_('UZAVŘENÍ Z TABULKY', radek[SL.ID - 1], 'CHYBA', err.message);
+    }
+  });
 }
 
 function apiNesplneno_(id, duvod, kdo) {
