@@ -40,6 +40,7 @@
   .nazev{font-size:16px;margin:6px 0 2px}
   .cas{font-weight:700}
   .pozde{color:var(--cervena)}
+  .udaj{font-size:17px;font-weight:700;margin:8px 0;letter-spacing:.3px}
   button{
     font-family:inherit;font-size:19px;font-weight:700;
     padding:16px;width:100%;border:0;border-radius:10px;
@@ -90,7 +91,7 @@
 
 <script src="konfigurace.js"></script>
 <script>
-const VERZE = '2.1';
+const VERZE = '2.2';
 
 let stav = {
   url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
@@ -154,6 +155,14 @@ function pruh(typ, text){
 function jePozde(nakladka){
   const cas = new Date(String(nakladka).replace(' ','T'));
   return !isNaN(cas) && cas < new Date();
+}
+
+/** 2026-11-23 13:00 → 23.11.2026 13:00 (jak se to čte u nás) */
+function formatNakladka(hodnota){
+  const text = String(hodnota || '').trim();
+  const shoda = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if(!shoda) return text;
+  return Number(shoda[3]) + '.' + Number(shoda[2]) + '.' + shoda[1] + ' ' + shoda[4] + ':' + shoda[5];
 }
 
 // ---------- obrazovky ----------
@@ -393,11 +402,12 @@ function vykresliSeznam(zprava, typZpravy){
     stav.polozky.forEach(function(p, index){
       html +=
         '<div class="karta prio" data-index="'+index+'">' +
-          '<div class="radek"><span class="odznak">PRIORITNÍ</span>' +
-          '<span class="cas'+(jePozde(p.nakladka)?' pozde':'')+'">'+h(p.nakladka)+'</span></div>' +
+          '<span class="odznak">PRIORITNÍ</span>' +
+          '<div class="udaj'+(jePozde(p.nakladka)?' pozde':'')+'">NUTNO NALOŽIT: ' +
+            h(formatNakladka(p.nakladka)) + '</div>' +
           '<div class="velke">'+h(p.stroj)+'</div>' +
           '<div class="nazev">'+h(p.nazev || p.psk)+'</div>' +
-          '<div class="radek"><span class="popisek">na pobočku</span><strong>'+h(p.pobocka)+'</strong></div>' +
+          '<div class="udaj">NA POBOČKU: '+h(p.pobocka)+'</div>' +
           '<div class="radek"><span class="popisek">lokace</span><strong>'+h(p.lokace || '—')+'</strong></div>' +
           (p.naSklade ? '' : pruh('pozor','Tenhle kus není v zásobě – bude potřeba náhrada.')) +
         '</div>';
@@ -432,10 +442,12 @@ function otevriPolozku(index, zDoteku){
   hlavicka('Naložit ' + p.pobocka, stav.sklad);   // zastaví i samočinné obnovování
   document.getElementById('obsah').innerHTML =
     '<div class="karta prio">' +
-      '<div class="radek"><span class="popisek">naskenuj stroj</span>' +
-      '<span class="cas'+(jePozde(p.nakladka)?' pozde':'')+'">'+h(p.nakladka)+'</span></div>' +
+      '<div class="udaj'+(jePozde(p.nakladka)?' pozde':'')+'">NUTNO NALOŽIT: ' +
+        h(formatNakladka(p.nakladka)) + '</div>' +
+      '<div class="popisek">naskenuj tenhle stroj</div>' +
       '<div class="velke">'+h(p.stroj)+'</div>' +
       '<div class="nazev">'+h(p.nazev || p.psk)+'</div>' +
+      '<div class="udaj">NA POBOČKU: '+h(p.pobocka)+'</div>' +
       '<div class="radek"><span class="popisek">lokace</span><strong>'+h(p.lokace || '—')+'</strong></div>' +
     '</div>' +
     '<div class="karta">' +
