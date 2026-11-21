@@ -179,6 +179,43 @@ function zkontrolujTicket(ticketId) {
 }
 
 /**
+ * DIAGNOSTIKA: pošle zkušební odpověď s kopií na adresu ze sloupce
+ * `Odpověď na` u posledního požadavku.
+ *
+ * K čemu: když odpověď v RT je, ale nikomu nepřijde e-mail, tohle rozhodne,
+ * jestli neposílá RT vůbec, nebo jen neupozorňuje autora na jeho vlastní text.
+ *
+ * Postup: do sloupce `Odpověď na` u posledního řádku napsat adresu
+ * (nejlépe jinou, než ze které požadavek přišel) a spustit.
+ *
+ * ⚠ Opravdu pošle korespondenci do ticketu.
+ */
+function testKopie() {
+  const list = list_(LIST_ROTACE);
+  const posledni = list.getLastRow();
+  if (posledni < 2) { Logger.log('V listu ROTACE nic není.'); return; }
+
+  const ticketId = String(list.getRange(posledni, SL.TICKET).getValue() || '').trim();
+  const kopie = String(list.getRange(posledni, SL.ODPOVED_NA).getValue() || '').trim();
+
+  if (!ticketId) { Logger.log('Poslední řádek nemá číslo ticketu.'); return; }
+  if (!kopie) {
+    Logger.log('Sloupec „Odpověď na" je u posledního řádku prázdný.\n' +
+      'Napiš do něj adresu, na kterou se má kopie poslat, a spusť znovu.');
+    return;
+  }
+
+  const vysledek = rtOdpovez_(ticketId,
+    'Zkouska: odchazi odpoved z robota rotace s kopii na ' + kopie + '.', kopie);
+
+  Logger.log('Ticket: ' + ticketId + '\nKopie na: ' + kopie +
+    '\nOdpověď RT:\n' + vysledek.text +
+    '\n\n→ Když na tu adresu e-mail dorazí, RT posílá v pořádku' +
+    ' a chybějící pošta u žadatele je jen tím, že RT neupozorňuje autora' +
+    ' na jeho vlastní text.');
+}
+
+/**
  * DIAGNOSTIKA: vezme poslední požadavek z listu ROTACE a na jeho ticketu
  * zkusí odpověď i uzavření. Vypíše CELOU odpověď RT, ne jen stavový řádek.
  *

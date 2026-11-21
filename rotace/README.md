@@ -257,7 +257,15 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 > Hledat ho se dá přes `Status = 'resolved'`, nebo přímo podle čísla ticketu
 > ze sloupce `Ticket` v listu `ROTACE`.
 >
-> Odpověď jde zároveň e-mailem žadateli, tedy na adresu, ze které požadavek přišel.
+> Odpověď jde zároveň e-mailem žadateli, tedy na adresu, ze které požadavek přišel,
+> a **v kopii na adresu ze sloupce `Odpověď na`** (z pole `Odpoved na` v požadavku).
+>
+> ⚠ **Při zkoušení vlastním požadavkem e-mail nepřijde.** Robot píše pod účtem,
+> jehož token má v `RT_TOKEN`. Když je to tentýž člověk, který požadavek poslal,
+> RT mu vlastní text mailem nepřeposílá – jen ho zapíše do ticketu.
+> Ověřeno 21. 11. 2026 (ticket 2466735: Creator i Requestor tentýž).
+> V provozu, kdy žádá pobočka, to nenastane. Na doložení slouží `testKopie()`,
+> která pošle kopii na jinou adresu.
 | Čtečka | karta s červeným pruhem a velkým `4XAB` |
 | Po skenu | řádek zčervená, stav `naloženo (čeká PSP)`, stroj v `ZASOBA_CS` je `vydáno` |
 | Po zadání PSP | řádek zezelená, stav `uzavřeno`, ticket v helpdesku `resolved` |
