@@ -124,6 +124,57 @@ function rtUzavri_(ticketId) {
   return rtPost_('/REST/1.0/ticket/' + ticketId + '/edit', 'Status: resolved\n');
 }
 
+/**
+ * Zjistí, co RT ve skutečnosti odpověděl.
+ *
+ * `RT/5.0.10 200 Ok` na prvním řádku znamená jen „požadavek dorazil".
+ * Jestli se akce povedla, stojí až na řádku s `#`. Právě na tom jsme už
+ * jednou naletěli u zakládání fronty.
+ */
+function rtHlaskaOdpovedi_(text) {
+  const radky = String(text || '').split('\n')
+    .map(r => r.trim())
+    .filter(r => r.indexOf('#') === 0);
+  return radky.length ? radky.join(' ') : '(RT nic nenapsal)';
+}
+
+/**
+ * DIAGNOSTIKA: vezme poslední požadavek z listu ROTACE a na jeho ticketu
+ * zkusí odpověď i uzavření. Vypíše CELOU odpověď RT, ne jen stavový řádek.
+ *
+ * ⚠ Opravdu pošle komentář do ticketu – spouštět jen na zkušebním.
+ */
+function diagnostikaOdpovedi() {
+  const list = list_(LIST_ROTACE);
+  const posledni = list.getLastRow();
+  if (posledni < 2) { Logger.log('V listu ROTACE nic není.'); return; }
+
+  const ticketId = String(list.getRange(posledni, 2).getValue() || '').trim();
+  if (!ticketId) { Logger.log('Poslední řádek nemá číslo ticketu.'); return; }
+
+  const zpravy = ['Ticket: ' + ticketId];
+
+  const pred = rtGet_('/REST/1.0/ticket/' + ticketId + '/show');
+  zpravy.push('STAV PŘED: ' + rtHodnota_(pred, 'Status') +
+    ' | fronta: ' + rtHodnota_(pred, 'Queue') +
+    ' | předmět: ' + rtHodnota_(pred, 'Subject'));
+
+  const odpoved = rtOdpovez_(ticketId, 'Zkouska odpovedi z robota rotace.');
+  zpravy.push('--- ODPOVĚĎ, celé tělo:');
+  zpravy.push(odpoved.text);
+
+  const uzavreni = rtUzavri_(ticketId);
+  zpravy.push('--- UZAVŘENÍ, celé tělo:');
+  zpravy.push(uzavreni.text);
+
+  Utilities.sleep(1000);
+  const po = rtGet_('/REST/1.0/ticket/' + ticketId + '/show');
+  zpravy.push('STAV PO: ' + rtHodnota_(po, 'Status'));
+
+  Logger.log(zpravy.join('\n'));
+  return zpravy.join('\n');
+}
+
 /** Ověření, že se na helpdesk vůbec dostaneme. Spustit ručně. */
 function testHelpdesk() {
   const dotaz = "Queue='" + RT_FRONTA_VSTUP + "' AND Created > '2 days ago'";

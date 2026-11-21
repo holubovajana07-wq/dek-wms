@@ -250,6 +250,14 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 | List `ROTACE` | žlutý řádek, stav `k výdeji` |
 | List `ROTACE_LOG` | `NOVÝ POŽADAVEK` a `ODPOVĚĎ PRIJATO` |
 | Helpdesk | komentář s blokem `### ODPOVED ROTACE v1` |
+
+> ⚠ **Uzavřený ticket zmizí z přehledu fronty.** Běžný pohled filtruje
+> `Status = '__Active__'`, a `resolved` mezi aktivní nepatří. Když tedy
+> požadavek po uzavření ve frontě nevidíš, **je to v pořádku – právě proto**.
+> Hledat ho se dá přes `Status = 'resolved'`, nebo přímo podle čísla ticketu
+> ze sloupce `Ticket` v listu `ROTACE`.
+>
+> Odpověď jde zároveň e-mailem žadateli, tedy na adresu, ze které požadavek přišel.
 | Čtečka | karta s červeným pruhem a velkým `4XAB` |
 | Po skenu | řádek zčervená, stav `naloženo (čeká PSP)`, stroj v `ZASOBA_CS` je `vydáno` |
 | Po zadání PSP | řádek zezelená, stav `uzavřeno`, ticket v helpdesku `resolved` |

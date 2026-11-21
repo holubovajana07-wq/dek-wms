@@ -228,9 +228,10 @@ function uzavriSPsp_(list, radek, psp, kdoText) {
     try {
       const vysledekOdpovedi = rtOdpovez_(ticketId, text);
       const vysledekUzavreni = rtUzavri_(ticketId);
-      const ok = rtStavOdpovedi_(vysledekOdpovedi.text) === 200;
-      odpoved = (ok ? 'odpověď OK' : 'odpověď CHYBA') +
-        ', uzavření ' + rtStavOdpovedi_(vysledekUzavreni.text);
+      // Co RT doopravdy udělal, stojí na řádku s #, ne ve stavovém řádku.
+      odpoved = 'ticket ' + ticketId +
+        ' | odpověď: ' + rtHlaskaOdpovedi_(vysledekOdpovedi.text) +
+        ' | uzavření: ' + rtHlaskaOdpovedi_(vysledekUzavreni.text);
     } catch (err) {
       odpoved = 'CHYBA: ' + err.message;
     }
