@@ -56,7 +56,9 @@ Otevřít [projekt Rotace robot TEST](https://script.google.com/d/1CCD6VLK1s2B9E
 |---|---|
 | `SHEET_ID` | `1odBO21c-eRu-vIk3epKPO4st3C7JgXovlfu7h_PV360` |
 | `RT_TOKEN` | **zkopírovat z projektu `Půjčovna_skript`** (Nastavení projektu → Vlastnosti skriptu) |
-| `ROTACE_TOKEN` | vymyslet libovolné heslo, třeba `rotace2026test` |
+
+> `ROTACE_TOKEN` se od verze 2.0 nepoužívá – nahradilo ho přihlašování skladníků.
+> Můžeš ho smazat. `ROTACE_SECRET` se vyrobí samo při prvním přihlášení.
 
 > 🔒 `RT_TOKEN` je přístup do firemního helpdesku. Kopíruj ho **přímo mezi
 > projekty v prohlížeči** – neposílej ho do chatu, do e-mailu ani do repozitáře.
@@ -68,7 +70,31 @@ Google požádá o oprávnění – potvrdit.
 
 1. `nastavTabulku()` – založí listy `ROTACE`, `ZASOBA_CS`, `ROTACE_LOG`, `ROTACE_CONTROL`
 2. `naplnZkusebniZasobu()` – nasype 42 vymyšlených strojů v 16 skupinách
-3. `kontrolaNastaveni()` – vypíše, co je hotové a co chybí
+3. `nastavUzivatele()` – založí list `UZIVATELE` a dva zkušební skladníky
+   (jednoho pro každý sklad) s náhodným PINem. **PINy se vypíšou do protokolu
+   spuštění – přečíst je tam.** V listu se dají kdykoli přepsat.
+4. `kontrolaNastaveni()` – vypíše, co je hotové a co chybí
+
+### List `UZIVATELE`
+
+Ten list **už v tabulce je** – patří WMS a má sloupce `Jméno | PIN | Aktivní`.
+Rotace k němu potřebuje navíc **`Sklad`**.
+
+`nastavUzivatele()` proto:
+
+- přidá sloupec **`Sklad` na konec** (nikdy doprostřed – WMS by si mohlo
+  hledat sloupce podle pozice a rozbilo by se),
+- stávajícím skladníkům předvyplní **`S096`**, protože WMS dnes běží jen na CS2,
+- nic jiného nepřepíše.
+
+**Kdo patří na S093, toho přepiš ručně** – v listu, nebo hromadně:
+
+```javascript
+prirazSklad(['Novák Jan', 'Svoboda Petr'], 'S093')
+```
+
+Sloupce se čtou **podle názvů v hlavičce**, ne podle pořadí, takže se dají
+kdykoli přeházet. Kdo má `Aktivní` = `NE`, v seznamu se neobjeví.
 
 ### 3. Zkoušky nanečisto (nic se neodešle)
 
@@ -104,7 +130,10 @@ pak v GitHub Desktopu **Commit to main** a **Push origin**.
 
 ### 6. Spustit robota
 
-`nastavSpoust()` – od té chvíle kouká do helpdesku každou minutu.
+1. `zacniTed()` – robot bude brát jen požadavky vzniklé **od téhle chvíle**.
+   Bez toho by první běh prohledával celý včerejšek ve vstupní frontě skladu,
+   kam chodí spousta věcí, které s rotací nemají nic společného.
+2. `nastavSpoust()` – od té chvíle kouká do helpdesku každou minutu.
 
 > Apps Script neumí „po 2 minutách" – povolené jsou 1, 5, 10, 15 a 30.
 > Bereme 1 minutu. Kdyby začal docházet denní limit spouští,
@@ -117,8 +146,21 @@ Zastavit se dá kdykoli funkcí `zrusSpoust()`.
 Na čtečce otevřít **https://holubovajana07-wq.github.io/dek-wms/rotace/**
 a přidat na plochu jako druhou aplikaci (vedle DEK WMS).
 
-Při prvním spuštění zadat **heslo** (`ROTACE_TOKEN`) a vybrat **sklad**.
-Uloží se to jen v té čtečce.
+**Přihlášení má tři kroky:**
+
+1. **Vyber sklad** – S096 Úžice, nebo S093 Prostějov
+2. **Vyber jméno** – nabídnou se jen skladníci **toho skladu**
+3. **Zadej PIN** – čtyři číslice na velké klávesnici
+
+Platnost přihlášení je **12 hodin**, pak se přihlašuje znovu.
+Pět chybných PINů = pauza 5 minut.
+
+> ⚠ **Sklad se bere z přihlášení, ne z adresy.** Skladník z Prostějova tedy
+> nevidí úžické požadavky, ani kdyby si adresu přepsal. Stejně je chráněný
+> i výdej: požadavek z cizího skladu odbavit nejde.
+
+PIN se do čtečky nikdy neposílá – ověřuje se na serveru a zpátky jde jen
+podepsaný klíč, ve kterém je jméno, sklad a platnost.
 
 > Skener si poradí sám, pokud je na čtečce nahraný profil `WMS` –
 > ten se váže na Chrome, takže platí i pro tuhle stránku.
@@ -162,6 +204,26 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 | Po skenu | řádek zčervená, stav `naloženo (čeká PSP)`, stroj v `ZASOBA_CS` je `vydáno` |
 | Po zadání PSP | řádek zezelená, stav `uzavřeno`, ticket v helpdesku `resolved` |
 
+### Barvy v listu `ROTACE`
+
+**Řádek** drží barvu podle stavu:
+
+| Barva | Stav |
+|---|---|
+| žlutá | `k výdeji` – čeká na skladníka |
+| červená | `naloženo (čeká PSP)` |
+| zelená | `uzavřeno` |
+| šedá | `zrušeno` nebo `nesplněno` |
+
+**Buňka s ID stroje** navíc zoranžoví, když požadovaný stroj nesedí se
+skladovou zásobou – není v ní, je už vydaný, leží na jiném skladu, nebo má
+jinou skupinu. Důvod je v komentáři buňky i v Poznámce, včetně toho,
+**kolik kusů ze stejné skupiny je k dispozici** jako náhrada.
+
+Zásoba se mění, takže stroj může přestat být dostupný i po zapsání požadavku.
+Přepočítat všechny čekající řádky umí **`prekontrolujDostupnost()`** –
+spustit ručně, nebo si na ni dát vlastní časovou spoušť (stačí po hodině).
+
 ## Co tady ještě není
 
 - **TSC** – zápis urgentu k rezervaci (vědomě odloženo)
@@ -179,7 +241,10 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 | Ticket zůstal v hlavní frontě | fronta `Rotace stroju CS` neexistuje – viz výše; v logu je `FRONTA NEEXISTUJE` |
 | `Permission Denied` u přesunu | token nemá právo zapisovat do cílové fronty – řeší správce helpdesku |
 | `Chybí vlastnost skriptu …` | krok 1 |
-| `Neplatný token` na čtečce | heslo v čtečce ≠ `ROTACE_TOKEN` |
+| V seznamu jmen nikdo není | v listu `UZIVATELE` není nikdo s tím skladem a `Aktivní` = ANO |
+| `Špatný PIN` i se správným | sedí `Sklad` u toho jména v listu `UZIVATELE`? |
+| `Přihlášení vypršelo` | normální po 12 hodinách – přihlásit se znovu |
+| `Tenhle požadavek patří skladu …` | skladník je přihlášený pod druhým skladem |
 | `Stroj … není ve skladové zásobě` | `naplnZkusebniZasobu()` neproběhl |
 | Helpdesk vrací chybu | `RT_TOKEN` se nezkopíroval správně |
 | Sken nepadá do pole | profil skeneru – `docs/scanwedge-profily.md` |

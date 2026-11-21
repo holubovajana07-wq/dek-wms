@@ -62,6 +62,31 @@ function najdiRadekPozadavku_(idPozadavku) {
   return 0;
 }
 
+// ------------------------------------------------------------
+// Paměť už prohlédnutých ticketů
+// ------------------------------------------------------------
+// RT bere v dotazu `Created > ...` jen datum, čas ignoruje. Filtr podle času
+// tedy sám o sobě nestačí – fronta by se celý den dokola vracela celá.
+// Proto si vedeme seznam ticketů, na které jsme se už podívali.
+// Bez toho se každou minutu znovu stahovalo 30 ticketů (= přes 40 000 dotazů
+// denně, nad limit Apps Scriptu) a do logu padala pořád tatáž chyba.
+
+const PAMET_TICKETU = 300;
+
+function videneTickety_() {
+  const ulozene = String(hodnotaControl_('VIDENE_TICKETY') || '');
+  return new Set(ulozene.split(',').filter(x => x));
+}
+
+function zapamatujTicket_(mnozina, ticketId) {
+  mnozina.add(String(ticketId));
+}
+
+function ulozVidene_(mnozina) {
+  const seznam = Array.from(mnozina).slice(-PAMET_TICKETU);
+  nastavControl_('VIDENE_TICKETY', seznam.join(','));
+}
+
 /** Jediný vstupní bod: projde nové ticketky a zapíše z nich požadavky. */
 function nactiPozadavky() {
   const zamek = LockService.getScriptLock();
@@ -69,7 +94,8 @@ function nactiPozadavky() {
 
   try {
     const ted = new Date();
-    const idcka = rtNajdiNoveTickety_();
+    const videne = videneTickety_();
+    const idcka = rtNajdiNoveTickety_().filter(id => !videne.has(String(id)));
 
     let zapsano = 0, preskoceno = 0, chyb = 0;
 
@@ -77,6 +103,10 @@ function nactiPozadavky() {
       try {
         const hlavicka = rtGet_('/REST/1.0/ticket/' + ticketId + '/show');
         const predmet = rtHodnota_(hlavicka, 'Subject');
+
+        // Zapamatujeme si až ten, na který jsme se opravdu podívali.
+        // Když spojení selže, ticket se příště zkusí znovu.
+        zapamatujTicket_(videne, ticketId);
 
         // Není náš ticket – nesaháme na něj a necháme ho ostatním.
         if (predmet.toUpperCase().indexOf(PREDMET_KLIC) === -1) return;
@@ -107,6 +137,7 @@ function nactiPozadavky() {
     });
 
     nastavControl_('POSLEDNI_KONTROLA', formatDatumCas_(ted));
+    ulozVidene_(videne);
 
     if (zapsano || chyb) {
       log_('SOUHRN', '', 'OK', 'zapsáno: ' + zapsano + ', přeskočeno: ' + preskoceno + ', chyb: ' + chyb);
@@ -164,6 +195,7 @@ function zapisPozadavek_(pole, ticketId) {
   const cilovy = radek || list.getLastRow() + 1;
   list.getRange(cilovy, 1, 1, SL_POCET).setValues([hodnoty]);
   obarviRadek_(list, cilovy);
+  zkontrolujDostupnost_(list, cilovy);   // sedí stroj se skladovou zásobou?
 
   log_(radek ? 'ZMĚNA' : 'NOVÝ POŽADAVEK', id, 'OK',
     pole['sklad'] + ' → ' + pole['pobocka'] + ', stroj ' + pole['id stroje']);
@@ -218,6 +250,76 @@ function odpovezPrijato_(ticketId, id, pole) {
   } catch (err) {
     log_('ODPOVĚĎ PRIJATO', id, 'CHYBA', err.message);
   }
+}
+
+/**
+ * Porovná požadovaný stroj se skladovou zásobou a dá to v tabulce najevo.
+ *
+ * Řádek drží barvu podle stavu, problém se označí na buňce s ID stroje –
+ * oranžově. Do Poznámky se napíše proč a kolik kusů ze skupiny je k dispozici,
+ * aby bylo hned vidět, jestli stačí vzít náhradu, nebo je potřeba zasáhnout.
+ */
+function zkontrolujDostupnost_(list, radek) {
+  const stroj = String(list.getRange(radek, SL.STROJ_POZ).getValue()).toUpperCase().trim();
+  const psk = String(list.getRange(radek, SL.PSK).getValue()).toUpperCase().trim();
+  const sklad = String(list.getRange(radek, SL.SKLAD).getValue()).toUpperCase().trim();
+
+  const vZasobe = zasobaNajdiStroj_(stroj);
+  let problem = '';
+
+  if (!vZasobe) {
+    problem = 'Stroj ' + stroj + ' není ve skladové zásobě';
+  } else if (vZasobe.stav !== ZASOBA_NA_SKLADE) {
+    problem = 'Stroj ' + stroj + ' je podle zásoby už vydaný';
+  } else if (vZasobe.sklad !== sklad) {
+    problem = 'Stroj ' + stroj + ' leží na ' + vZasobe.sklad + ', požadavek je na ' + sklad;
+  } else if (psk && vZasobe.psk !== psk) {
+    problem = 'Stroj ' + stroj + ' je v zásobě skupina ' + vZasobe.psk + ', v požadavku ' + psk;
+  }
+
+  const bunkaStroje = list.getRange(radek, SL.STROJ_POZ);
+
+  if (!problem) {
+    bunkaStroje.setBackground(null).setFontColor(null).setNote('');
+    return false;
+  }
+
+  const nahrady = zasobaSkupina_(psk, sklad).length;
+  const text = problem + '. Ze skupiny ' + psk + ' je na ' + sklad + ' k dispozici ' +
+    nahrady + ' ks.';
+
+  bunkaStroje.setBackground('#f6b26b').setFontColor('#783f04').setNote(text);
+
+  const poznamka = list.getRange(radek, SL.POZNAMKA);
+  const stavajici = String(poznamka.getValue() || '');
+  if (stavajici.indexOf(problem) === -1) {
+    poznamka.setValue(stavajici ? stavajici + ' | ' + text : text);
+  }
+
+  log_('STROJ MIMO ZÁSOBU', list.getRange(radek, SL.ID).getValue(), 'POZOR', text);
+  return true;
+}
+
+/**
+ * Překontroluje všechny požadavky, které čekají na výdej.
+ * Zásoba se mění – stroj mohl mezitím odjet na jiný požadavek.
+ * Spustit ručně, nebo si na to dát vlastní časovou spoušť (stačí po hodině).
+ */
+function prekontrolujDostupnost() {
+  const list = list_(LIST_ROTACE);
+  const posledni = list.getLastRow();
+  if (posledni < 2) { Logger.log('Žádné požadavky.'); return; }
+
+  const stavy = list.getRange(2, SL.STAV, posledni - 1, 1).getValues();
+  let problemu = 0, zkontrolovano = 0;
+
+  stavy.forEach((hodnota, index) => {
+    if (hodnota[0] !== STAV_K_VYDEJI) return;
+    zkontrolovano++;
+    if (zkontrolujDostupnost_(list, index + 2)) problemu++;
+  });
+
+  Logger.log('Zkontrolováno ' + zkontrolovano + ' čekajících požadavků, problémů: ' + problemu);
 }
 
 /** Barva řádku podle stavu – ať je v tabulce vidět, co se děje. */

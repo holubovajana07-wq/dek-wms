@@ -57,7 +57,10 @@ function rtNajdiNoveTickety_() {
     if (shoda) idcka.push(shoda[1]);
   });
 
-  return idcka;
+  // Vstupní fronta je hlavní fronta skladu, chodí do ní spousta věcí, které
+  // s rotací nemají nic společného. U každého ticketu se musíme doptat na
+  // předmět, takže strop na jeden běh – jinak by se do šesti minut nevešel.
+  return idcka.slice(-MAX_TICKETU_NA_BEH);
 }
 
 /** Přehodí ticket do jiné fronty. */

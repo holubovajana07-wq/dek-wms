@@ -21,6 +21,10 @@ const RT_FRONTA_ROTACE = 'Rotace stroju CS';
 // Předmět, podle kterého robot pozná svoje ticketky.
 const PREDMET_KLIC = 'ROTACE';
 
+// Kolik ticketů nanejvýš projít v jednom běhu. Vstupní fronta je rušná a na
+// každý ticket je potřeba jeden dotaz navíc; Apps Script má na běh 6 minut.
+const MAX_TICKETU_NA_BEH = 30;
+
 // Značky bloku v těle požadavku.
 const BLOK_START = '### POZADAVEK ROTACE v1';
 const BLOK_KONEC = '### KONEC';

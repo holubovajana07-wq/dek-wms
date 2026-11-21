@@ -102,6 +102,19 @@ function naplnZkusebniZasobu() {
 // Spoušť
 // ------------------------------------------------------------
 
+/**
+ * Řekne robotovi „co bylo do téhle chvíle, mě nezajímá".
+ *
+ * Spustit TĚSNĚ PŘED nastavSpoust(). Bez toho by první běh prohledal celý
+ * včerejšek ve vstupní frontě skladu – a to je fronta, kam chodí spousta
+ * věcí, které s rotací nemají nic společného.
+ */
+function zacniTed() {
+  nastavControl_('POSLEDNI_KONTROLA', formatDatumCas_(new Date()));
+  Logger.log('Robot bude brát jen požadavky vzniklé od ' +
+    formatDatumCas_(new Date()) + ' dál.');
+}
+
 // ⚠ Apps Script neumí spoušť „po 2 minutách". Povolené hodnoty jsou
 // 1, 5, 10, 15 a 30 minut. Bereme tedy 1 minutu – rychleji, než bylo v zadání.
 //
@@ -135,18 +148,31 @@ function zrusSpoust() {
 function kontrolaNastaveni() {
   const zpravy = [];
 
-  ['SHEET_ID', 'RT_TOKEN', 'ROTACE_TOKEN'].forEach(klic => {
+  ['SHEET_ID', 'RT_TOKEN'].forEach(klic => {
     zpravy.push(klic + ': ' + (vlastnost_(klic) ? 'nastaveno' : '❌ CHYBÍ'));
   });
+  zpravy.push('ROTACE_SECRET: ' + (vlastnost_('ROTACE_SECRET')
+    ? 'nastaveno' : 'zatím ne (vyrobí se samo při prvním přihlášení)'));
 
   try {
     const ss = tabulka_();
     zpravy.push('Tabulka: ' + ss.getName());
-    [LIST_ROTACE, LIST_ZASOBA, LIST_LOG, LIST_CONTROL].forEach(nazev => {
+    [LIST_ROTACE, LIST_ZASOBA, LIST_LOG, LIST_CONTROL, LIST_UZIVATELE].forEach(nazev => {
       zpravy.push('List ' + nazev + ': ' + (ss.getSheetByName(nazev) ? 'je' : '❌ chybí'));
     });
     zpravy.push('Strojů v zásobě: ' + Math.max(0, list_(LIST_ZASOBA).getLastRow() - 1));
     zpravy.push('Požadavků: ' + Math.max(0, list_(LIST_ROTACE).getLastRow() - 1));
+
+    try {
+      const skladnici = uzivateleVse_().filter(u => u.aktivni !== 'NE');
+      Object.keys(SKLADY).forEach(kod => {
+        zpravy.push('Skladníků pro ' + kod + ': ' + skladnici.filter(u => u.sklad === kod).length);
+      });
+      const bezPinu = skladnici.filter(u => !u.pin).length;
+      if (bezPinu) zpravy.push('⚠ Skladníků bez PINu: ' + bezPinu + ' – nepřihlásí se');
+    } catch (err) {
+      zpravy.push('❌ UZIVATELE: ' + err.message + ' → spusť nastavUzivatele()');
+    }
   } catch (err) {
     zpravy.push('❌ Tabulka: ' + err.message);
   }

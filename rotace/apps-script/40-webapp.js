@@ -8,18 +8,28 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
 
   try {
-    if (p.action === 'ping') {
-      return json_({ ok: true, verze: '1.0', cas: new Date() });
+    // Veřejné akce – bez nich by se skladník neměl jak přihlásit.
+    switch (p.action) {
+      case 'ping':
+        return json_({ ok: true, verze: '2.0', cas: new Date() });
+      case 'sklady':
+        return json_({ ok: true, sklady: Object.keys(SKLADY).map(k => ({ kod: k, nazev: SKLADY[k] })) });
+      case 'uzivatele':
+        return json_(apiUzivatele_(p.sklad));
+      case 'prihlaseni':
+        return json_(apiPrihlaseni_(p.jmeno, p.pin, p.sklad));
     }
 
-    overToken_(p.token);
+    // Všechno ostatní jen pro přihlášeného. Sklad se bere z klíče,
+    // ne z adresy – skladník tak vidí výhradně svůj sklad.
+    const kdo = overKlic_(p.klic);
 
     switch (p.action) {
-      case 'seznam': return json_(apiSeznam_(p.sklad));
-      case 'skupina': return json_(apiSkupina_(p.psk, p.sklad));
-      case 'vydej': return json_(apiVydej_(p.id, p.stroj, p.uzivatel));
-      case 'psp': return json_(apiPsp_(p.id, p.psp));
-      case 'nesplneno': return json_(apiNesplneno_(p.id, p.duvod));
+      case 'seznam': return json_(apiSeznam_(kdo));
+      case 'skupina': return json_(apiSkupina_(p.psk, kdo));
+      case 'vydej': return json_(apiVydej_(p.id, p.stroj, kdo));
+      case 'psp': return json_(apiPsp_(p.id, p.psp, kdo));
+      case 'nesplneno': return json_(apiNesplneno_(p.id, p.duvod, kdo));
       default: return json_({ ok: false, chyba: 'Neznámá akce: ' + (p.action || '') });
     }
   } catch (err) {
@@ -32,19 +42,22 @@ function json_(objekt) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function overToken_(token) {
-  const ocekavany = vlastnost_('ROTACE_TOKEN');
-  if (!ocekavany) throw new Error('Není nastavená vlastnost ROTACE_TOKEN.');
-  if (String(token || '') !== ocekavany) throw new Error('Neplatný token.');
+/** Požadavek musí patřit skladu, pod kterým je skladník přihlášený. */
+function overSklad_(list, radek, kdo) {
+  const sklad = String(list.getRange(radek, SL.SKLAD).getValue()).toUpperCase().trim();
+  if (sklad !== kdo.sklad) {
+    throw new Error('Tenhle požadavek patří skladu ' + sklad + ', ty jsi přihlášený na ' + kdo.sklad + '.');
+  }
+  return sklad;
 }
 
 /** Co čeká na naložení – řazeno podle času nakládky, nejbližší nahoře. */
-function apiSeznam_(sklad) {
+function apiSeznam_(kdo) {
   const list = list_(LIST_ROTACE);
   const posledni = list.getLastRow();
-  if (posledni < 2) return { ok: true, polozky: [] };
+  if (posledni < 2) return { ok: true, polozky: [], kdo: kdo };
 
-  const kdeSklad = String(sklad || '').toUpperCase().trim();
+  const kdeSklad = kdo.sklad;
   const hodnoty = list.getRange(2, 1, posledni - 1, SL_POCET).getValues();
   const zasoba = zasobaVse_();
 
@@ -72,23 +85,23 @@ function apiSeznam_(sklad) {
 
   polozky.sort((a, b) => String(a.nakladka).localeCompare(String(b.nakladka)));
 
-  return { ok: true, polozky: polozky };
+  return { ok: true, polozky: polozky, kdo: kdo };
 }
 
-/** Náhradní kusy ze stejné skupiny. */
-function apiSkupina_(psk, sklad) {
+/** Náhradní kusy ze stejné skupiny – vždy jen z vlastního skladu. */
+function apiSkupina_(psk, kdo) {
   if (!psk) throw new Error('Chybí PSK.');
 
   return {
     ok: true,
-    stroje: zasobaSkupina_(psk, sklad).map(s => ({
+    stroje: zasobaSkupina_(psk, kdo.sklad).map(s => ({
       stroj: s.stroj, nazev: s.nazev, lokace: s.lokace
     }))
   };
 }
 
 /** Skladník naskenoval stroj – zapíše se výdej. */
-function apiVydej_(id, stroj, uzivatel) {
+function apiVydej_(id, stroj, kdo) {
   if (!id) throw new Error('Chybí ID požadavku.');
   if (!stroj) throw new Error('Chybí ID stroje.');
 
@@ -100,6 +113,8 @@ function apiVydej_(id, stroj, uzivatel) {
     const radek = najdiRadekPozadavku_(id);
     if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
 
+    const sklad = overSklad_(list, radek, kdo);
+
     const stav = list.getRange(radek, SL.STAV).getValue();
     if (stav === STAV_NALOZENO || stav === STAV_UZAVRENO) {
       throw new Error('Tenhle požadavek už je odbavený (' + stav + ').');
@@ -109,7 +124,6 @@ function apiVydej_(id, stroj, uzivatel) {
     const naskenovany = String(stroj).toUpperCase().trim();
     const pozadovany = String(list.getRange(radek, SL.STROJ_POZ).getValue()).toUpperCase().trim();
     const psk = String(list.getRange(radek, SL.PSK).getValue()).toUpperCase().trim();
-    const sklad = String(list.getRange(radek, SL.SKLAD).getValue()).toUpperCase().trim();
 
     const vZasobe = zasobaNajdiStroj_(naskenovany);
     if (!vZasobe) throw new Error('Stroj ' + naskenovany + ' není ve skladové zásobě.');
@@ -126,14 +140,19 @@ function apiVydej_(id, stroj, uzivatel) {
     list.getRange(radek, SL.VYDEJ).setValue(new Date());
     list.getRange(radek, SL.STAV).setValue(STAV_NALOZENO);
     if (naskenovany !== pozadovany) {
-      list.getRange(radek, SL.POZNAMKA).setValue('Náhrada za ' + pozadovany);
+      const poznamka = list.getRange(radek, SL.POZNAMKA);
+      const stavajici = String(poznamka.getValue() || '');
+      // Nepřepisovat – v poznámce už může být, proč původní kus nešel vydat.
+      poznamka.setValue(stavajici ? stavajici + ' | Náhrada za ' + pozadovany
+                                  : 'Náhrada za ' + pozadovany);
     }
     obarviRadek_(list, radek);
 
     zasobaOznacVydano_(vZasobe.radek);
 
-    log_('VÝDEJ', id, 'OK', naskenovany + (naskenovany !== pozadovany ? ' (náhrada za ' + pozadovany + ')' : '') +
-      (uzivatel ? ', ' + uzivatel : ''));
+    log_('VÝDEJ', id, 'OK', naskenovany +
+      (naskenovany !== pozadovany ? ' (náhrada za ' + pozadovany + ')' : '') +
+      ', ' + kdo.jmeno + ', ' + kdo.sklad);
 
     return {
       ok: true,
@@ -151,13 +170,15 @@ function apiVydej_(id, stroj, uzivatel) {
 }
 
 /** SO vystavilo PSP – dopíše se, odejde odpověď a ticket se uzavře. */
-function apiPsp_(id, psp) {
+function apiPsp_(id, psp, kdo) {
   if (!id) throw new Error('Chybí ID požadavku.');
   if (!psp) throw new Error('Chybí číslo PSP.');
 
   const list = list_(LIST_ROTACE);
   const radek = najdiRadekPozadavku_(id);
   if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+
+  overSklad_(list, radek, kdo);
 
   const stav = list.getRange(radek, SL.STAV).getValue();
   if (stav !== STAV_NALOZENO) throw new Error('Požadavek není ve stavu "naloženo" (je: ' + stav + ').');
@@ -196,17 +217,19 @@ function apiPsp_(id, psp) {
     }
   }
 
-  log_('PSP A UZAVŘENÍ', id, 'OK', psp + ' | ' + odpoved);
+  log_('PSP A UZAVŘENÍ', id, 'OK', psp + ' | ' + odpoved + ' | ' + kdo.jmeno);
 
   return { ok: true, id: id, psp: psp, helpdesk: odpoved, zprava: 'Hotovo, pobočce odešla odpověď.' };
 }
 
-function apiNesplneno_(id, duvod) {
+function apiNesplneno_(id, duvod, kdo) {
   if (!id) throw new Error('Chybí ID požadavku.');
 
   const list = list_(LIST_ROTACE);
   const radek = najdiRadekPozadavku_(id);
   if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+
+  overSklad_(list, radek, kdo);
 
   list.getRange(radek, SL.STAV).setValue(STAV_NESPLNENO);
   list.getRange(radek, SL.POZNAMKA).setValue(duvod || '');
