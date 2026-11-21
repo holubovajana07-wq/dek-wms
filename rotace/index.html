@@ -96,7 +96,7 @@
 
 <script src="konfigurace.js"></script>
 <script>
-const VERZE = '2.4';
+const VERZE = '2.6';
 
 let stav = {
   url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
@@ -592,7 +592,12 @@ async function odesliSken(){
 
   try{
     const data = await zavolej('vydej', { id: stav.aktualni.id, stroj: stroj });
-    obrazovkaPsp(data);
+
+    // Skladník je hotový. PSP vystavuje SO, jemu o tom odejde e-mail.
+    nactiSeznam(
+      'Naloženo: ' + data.stroj +
+      (data.nahrada ? ' (náhrada za ' + data.pozadovany + ')' : '') + '.',
+      'ok');
   }catch(err){
     pole.disabled = false;
     pole.value = '';
@@ -603,34 +608,9 @@ async function odesliSken(){
   }
 }
 
-function obrazovkaPsp(vysledek){
-  hlavicka('Vystavit PSP', stav.sklad);
-
-  document.getElementById('obsah').innerHTML =
-    pruh('ok', 'Naloženo: ' + vysledek.stroj) +
-    (vysledek.nahrada ? pruh('pozor', 'Náhrada za ' + vysledek.pozadovany + ' – pobočce to oznámíme.') : '') +
-    '<div class="karta">' +
-      '<div class="popisek">Číslo PSP, které vystavilo SO</div>' +
-      '<input id="polePsp" placeholder="PSP-350-26-00412" style="font-size:19px">' +
-      '<button class="zelene" id="tlacitkoPsp">Uzavřít a odpovědět pobočce</button>' +
-      '<button class="vedlejsi" onclick="nactiSeznam(\'PSP se doplní později – řádek zůstal červený.\',\'pozor\')">PSP zatím nemám</button>' +
-    '</div>';
-
-  document.getElementById('tlacitkoPsp').addEventListener('click', async function(){
-    const psp = document.getElementById('polePsp').value.trim().toUpperCase();
-    if(!psp) return;
-    this.disabled = true;
-    this.textContent = 'Odesílám…';
-    try{
-      const data = await zavolej('psp', { id: stav.aktualni.id, psp: psp });
-      nactiSeznam('Hotovo. ' + (data.zprava || ''), 'ok');
-    }catch(err){
-      this.disabled = false;
-      this.textContent = 'Uzavřít a odpovědět pobočce';
-      document.getElementById('obsah').insertAdjacentHTML('afterbegin', pruh('chyba', err.message));
-    }
-  });
-}
+// Obrazovka na zadání PSP tu byla do 21. 11. 2026 a je pryč schválně:
+// PSP vystavuje SO, skladník s ním nemá nic společného. Po naložení
+// se vrací rovnou na seznam a SO dostane e-mail, že má PSP vystavit.
 
 async function ukazSkupinu(){
   const p = stav.aktualni;

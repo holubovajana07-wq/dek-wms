@@ -13,7 +13,7 @@ function doGet(e) {
       // Verzi zvyšovat při každé změně backendu – podle ní se pozná,
       // jestli je nasazená aktuální verze, nebo běží stará.
       case 'ping':
-        return json_({ ok: true, verze: '2.5', cas: new Date() });
+        return json_({ ok: true, verze: '2.6', cas: new Date() });
       case 'sklady':
         return json_({ ok: true, sklady: Object.keys(SKLADY).map(k => ({ kod: k, nazev: SKLADY[k] })) });
       case 'uzivatele':
@@ -30,7 +30,6 @@ function doGet(e) {
       case 'seznam': return json_(apiSeznam_(kdo));
       case 'skupina': return json_(apiSkupina_(p.psk, kdo));
       case 'vydej': return json_(apiVydej_(p.id, p.stroj, kdo));
-      case 'psp': return json_(apiPsp_(p.id, p.psp, kdo));
       case 'nesplneno': return json_(apiNesplneno_(p.id, p.duvod, kdo));
       default: return json_({ ok: false, chyba: 'Neznámá akce: ' + (p.action || '') });
     }
@@ -167,6 +166,9 @@ function apiVydej_(id, stroj, kdo) {
       (naskenovany !== pozadovany ? ' (náhrada za ' + pozadovany + ')' : '') +
       ', ' + kdo.jmeno + ', ' + kdo.sklad);
 
+    // SO musí vědět, že má vystavit PSP – skladník s tím nemá nic společného.
+    posliZadostOPsp_(list, radek, naskenovany, pozadovany, kdo);
+
     return {
       ok: true,
       id: id,
@@ -174,7 +176,7 @@ function apiVydej_(id, stroj, kdo) {
       nahrada: naskenovany !== pozadovany,
       pozadovany: pozadovany,
       lokace: vZasobe.lokace,
-      zprava: 'Naloženo. Teď je potřeba vystavit PSP.'
+      zprava: 'Naloženo. Hotovo, o PSP se postará SO.'
     };
 
   } finally {
@@ -183,27 +185,65 @@ function apiVydej_(id, stroj, kdo) {
 }
 
 /** SO vystavilo PSP – dopíše se, odejde odpověď a ticket se uzavře. */
-function apiPsp_(id, psp, kdo) {
-  if (!id) throw new Error('Chybí ID požadavku.');
-  if (!psp) throw new Error('Chybí číslo PSP.');
+/**
+ * E-mail, že stroj odjel a je potřeba vystavit PSP.
+ *
+ * Adresa je ve vlastnosti skriptu `EMAIL_PSP` (klidně víc adres oddělených
+ * čárkou) – do veřejného repozitáře osobní adresy nepatří.
+ * Bez té vlastnosti se nic neposílá a jen se to zapíše do logu.
+ */
+function posliZadostOPsp_(list, radek, nalozeny, pozadovany, kdo) {
+  const komu = vlastnost_('EMAIL_PSP');
+  const hodnoty = list.getRange(radek, 1, 1, SL_POCET).getValues()[0];
+  const id = hodnoty[SL.ID - 1];
 
-  const list = list_(LIST_ROTACE);
-  const radek = najdiRadekPozadavku_(id);
-  if (!radek) throw new Error('Požadavek ' + id + ' v tabulce není.');
+  if (!komu) {
+    log_('ŽÁDOST O PSP', id, 'PŘESKOČENO',
+      'Není nastavená vlastnost EMAIL_PSP, e-mail se neposlal.');
+    return;
+  }
 
-  overSklad_(list, radek, kdo);
+  const nahrada = nalozeny !== pozadovany;
 
-  const vysledek = uzavriSPsp_(list, radek, psp, kdo.jmeno);
-  return { ok: true, id: id, psp: psp, helpdesk: vysledek.helpdesk,
-           zprava: 'Hotovo, pobočce odešla odpověď.' };
+  const predmet = 'Rotace: vystavit PSP – ' + hodnoty[SL.SKLAD - 1] +
+    ' → ' + hodnoty[SL.POBOCKA - 1] + ', stroj ' + nalozeny;
+
+  const telo = [
+    'Stroj je naložený na vozidle a čeká na vystavení PSP.',
+    '',
+    'Sklad:              ' + hodnoty[SL.SKLAD - 1],
+    'Na pobočku:         ' + hodnoty[SL.POBOCKA - 1],
+    'ID stroje:          ' + nalozeny + (nahrada ? '   (náhrada za ' + pozadovany + ')' : ''),
+    'Položka:            ' + (hodnoty[SL.NAZEV - 1] || hodnoty[SL.PSK - 1]),
+    'Naloženo:           ' + formatDatumCas_(new Date()),
+    'Termín nakládky:    ' + formatNakladku_(hodnoty[SL.NAKLADKA - 1]),
+    'Naložil:            ' + kdo.jmeno,
+    '',
+    'ID požadavku:       ' + id,
+    'Ticket helpdesku:   ' + (hodnoty[SL.TICKET - 1] || '—'),
+    '',
+    'Až bude PSP vystavené, stačí jeho číslo napsat do sloupce PSP',
+    'u tohoto řádku v listu ROTACE. Zbytek proběhne sám:',
+    'pobočce odejde odpověď a ticket na helpdesku se uzavře.'
+  ].join('\n');
+
+  try {
+    MailApp.sendEmail({ to: komu, subject: predmet, body: telo });
+    log_('ŽÁDOST O PSP', id, 'OK', komu);
+  } catch (err) {
+    log_('ŽÁDOST O PSP', id, 'CHYBA', err.message);
+  }
 }
 
 /**
  * Dopsání PSP, odpověď pobočce a uzavření ticketu.
  *
- * Volá se ze dvou míst – ze čtečky (apiPsp_) a z hlídání tabulky
- * (dokonciPodlePsp), protože PSP vystavuje SO a číslo se často dopisuje
- * rovnou do tabulky, ne na čtečce.
+ * **Jediná cesta, jak se požadavek uzavírá.** Volá ji hlídání tabulky
+ * (`dokonciPodlePsp`), které běží v minutové kontrole.
+ *
+ * PSP vystavuje SO, ne skladník – ten o PSP vůbec neví a na čtečce se
+ * nezadává. Číslo se napíše do sloupce PSP v listu ROTACE a zbytek
+ * proběhne sám.
  */
 function uzavriSPsp_(list, radek, psp, kdoText) {
   const stav = list.getRange(radek, SL.STAV).getValue();

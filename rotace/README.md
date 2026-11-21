@@ -56,6 +56,7 @@ Otevřít [projekt Rotace robot TEST](https://script.google.com/d/1CCD6VLK1s2B9E
 |---|---|
 | `SHEET_ID` | `1odBO21c-eRu-vIk3epKPO4st3C7JgXovlfu7h_PV360` |
 | `RT_TOKEN` | **zkopírovat z projektu `Půjčovna_skript`** (Nastavení projektu → Vlastnosti skriptu) |
+| `EMAIL_PSP` | adresa, kam chodí upozornění „stroj naložen, vystavit PSP" (víc adres oddělit čárkou) |
 
 > `ROTACE_TOKEN` se od verze 2.0 nepoužívá – nahradilo ho přihlašování skladníků.
 > Můžeš ho smazat. `ROTACE_SECRET` se vyrobí samo při prvním přihlášení.
@@ -270,17 +271,23 @@ Do minuty se má objevit řádek v listu `ROTACE` (žlutý) a do helpdesku odpov
 | Po skenu | řádek zčervená, stav `naloženo (čeká PSP)`, stroj v `ZASOBA_CS` je `vydáno` |
 | Po zadání PSP | řádek zezelená, stav `uzavřeno`, ticket v helpdesku `resolved` |
 
-### PSP jde dopsat i přímo do tabulky
+### PSP se zadává jen v tabulce, ne na čtečce
 
-PSP vystavuje SO, ne skladník – číslo se tedy často dozví někdo jiný, než kdo
-stroj nakládal. Proto nemusí jít přes čtečku:
+**PSP vystavuje SO. Skladník s ním nemá nic společného** a na čtečce se
+nezadává — po naložení se vrací rovnou na seznam.
 
-**Stačí číslo napsat do sloupce `PSP` u červeného řádku a nechat být.**
-Do minuty robot sám odešle pobočce odpověď `NALOZENO`, uzavře ticket
-a řádek zezelená.
+Místo toho odejde **e-mail**, že stroj je na vozidle a je potřeba vystavit PSP.
+Adresa je ve vlastnosti skriptu **`EMAIL_PSP`** (víc adres oddělit čárkou).
+Bez ní se nic neposílá a zapíše se to jen do logu — osobní adresy do
+veřejného repozitáře nepatří.
 
-Na čtečce je proto u naloženého stroje tlačítko **„PSP zatím nemám"** –
-řádek zůstane červený, dokud číslo nepřibude (na čtečce nebo v tabulce).
+V e-mailu je sklad, pobočka, ID naloženého stroje (a za co je případně
+náhradou), položka, čas naložení, termín nakládky, kdo nakládal, ID požadavku
+a číslo ticketu.
+
+**Uzavření:** číslo PSP napsat do sloupce `PSP` u červeného řádku v listu
+`ROTACE`. Do minuty robot odešle pobočce odpověď `NALOZENO`, uzavře ticket
+a řádek zezelená. Je to **jediná cesta**, jak se požadavek uzavírá.
 
 ### Barvy v listu `ROTACE`
 
