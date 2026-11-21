@@ -91,7 +91,7 @@
 
 <script src="konfigurace.js"></script>
 <script>
-const VERZE = '2.2';
+const VERZE = '2.3';
 
 let stav = {
   url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
@@ -101,8 +101,14 @@ let stav = {
   nazevSkladu: '',
   platnostDo: 0,
   polozky: [],
+  pobocka: null,      // otevřená pobočka; null = seznam poboček
   aktualni: null
 };
+
+function zpetNaPobocky(){
+  stav.pobocka = null;
+  vykresliSeznam();
+}
 
 // ---------- uložení na čtečce ----------
 function nactiUlozene(){
@@ -393,25 +399,64 @@ function vykresliSeznam(zprava, typZpravy){
   znameId = ted;
   if(nove) upozorni();
 
+  // Stejná cesta jako v DEK WMS: nejdřív pobočky, po klepnutí jejich nakládky.
   let html = zprava ? pruh(typZpravy || 'ok', zprava) : '';
   if(nove) html += pruh('pozor', nove === 1 ? 'Přibyla nová nakládka.' : 'Přibyly nové nakládky: ' + nove);
 
-  if(!stav.polozky.length){
-    html += '<div class="prazdno">Žádná prioritní nakládka nečeká.</div>';
-  }else{
-    stav.polozky.forEach(function(p, index){
+  const skupiny = {};
+  stav.polozky.forEach(function(p){
+    (skupiny[p.pobocka] = skupiny[p.pobocka] || []).push(p);
+  });
+
+  // Pobočka, kterou skladník otevřel, už nemusí mít co nakládat.
+  if(stav.pobocka && !skupiny[stav.pobocka]) stav.pobocka = null;
+
+  if(stav.pobocka){
+    hlavicka('Pobočka ' + stav.pobocka, stav.sklad);
+
+    skupiny[stav.pobocka].forEach(function(p){
+      const index = stav.polozky.indexOf(p);
       html +=
         '<div class="karta prio" data-index="'+index+'">' +
+          '<div class="udaj">NA POBOČKU: '+h(p.pobocka)+'</div>' +
           '<span class="odznak">PRIORITNÍ</span>' +
           '<div class="udaj'+(jePozde(p.nakladka)?' pozde':'')+'">NUTNO NALOŽIT: ' +
             h(formatNakladka(p.nakladka)) + '</div>' +
           '<div class="velke">'+h(p.stroj)+'</div>' +
           '<div class="nazev">'+h(p.nazev || p.psk)+'</div>' +
-          '<div class="udaj">NA POBOČKU: '+h(p.pobocka)+'</div>' +
           '<div class="radek"><span class="popisek">lokace</span><strong>'+h(p.lokace || '—')+'</strong></div>' +
           (p.naSklade ? '' : pruh('pozor','Tenhle kus není v zásobě – bude potřeba náhrada.')) +
         '</div>';
     });
+
+    html += '<button class="vedlejsi" onclick="zpetNaPobocky()">Zpět na pobočky</button>';
+
+  }else{
+    hlavicka('Prioritní nakládka', stav.sklad);
+
+    const pobocky = Object.keys(skupiny).sort();
+
+    if(!pobocky.length){
+      html += '<div class="prazdno">Žádná prioritní nakládka nečeká.</div>';
+    }else{
+      pobocky.forEach(function(kod){
+        const polozky = skupiny[kod];
+        const nejblizsi = polozky.map(function(p){ return p.nakladka; }).sort()[0];
+        const chybi = polozky.filter(function(p){ return !p.naSklade; }).length;
+
+        html +=
+          '<div class="karta prio pobocka-volba" data-pobocka="'+h(kod)+'">' +
+            '<span class="odznak">PRIORITNÍ</span>' +
+            '<div class="velke">'+h(kod)+'</div>' +
+            '<div class="udaj'+(jePozde(nejblizsi)?' pozde':'')+'">NUTNO NALOŽIT: ' +
+              h(formatNakladka(nejblizsi)) + '</div>' +
+            '<div class="nazev">' + polozky.length +
+              (polozky.length === 1 ? ' stroj k naložení' :
+               polozky.length < 5 ? ' stroje k naložení' : ' strojů k naložení') + '</div>' +
+            (chybi ? pruh('pozor', chybi === 1 ? 'Jeden kus není v zásobě.' : chybi + ' kusy nejsou v zásobě.') : '') +
+          '</div>';
+      });
+    }
   }
 
   const cas = new Date();
@@ -426,7 +471,14 @@ function vykresliSeznam(zprava, typZpravy){
   // Seznam je na obrazovce → od téhle chvíle se obnovuje sám.
   spustObnovu();
 
-  document.querySelectorAll('.karta.prio').forEach(function(karta){
+  document.querySelectorAll('.pobocka-volba').forEach(function(karta){
+    karta.addEventListener('click', function(){
+      stav.pobocka = karta.getAttribute('data-pobocka');
+      vykresliSeznam();
+    });
+  });
+
+  document.querySelectorAll('.karta.prio[data-index]').forEach(function(karta){
     karta.addEventListener('click', function(){
       // zaměření musí proběhnout uvnitř doteku, jinak ho Android zahodí
       otevriPolozku(Number(karta.getAttribute('data-index')), true);
@@ -455,7 +507,7 @@ function otevriPolozku(index, zDoteku){
       '<button id="tlacitkoPotvrd">Potvrdit naložení</button>' +
       '<button class="vedlejsi" id="tlacitkoSkupina">Jiný kus ze skupiny</button>' +
       '<button class="vedlejsi" id="tlacitkoNelze">Nelze vydat</button>' +
-      '<button class="vedlejsi" onclick="nactiSeznam()">Zpět</button>' +
+      '<button class="vedlejsi" onclick="vykresliSeznam()">Zpět</button>' +
     '</div>';
 
   const pole = document.getElementById('poleSken');

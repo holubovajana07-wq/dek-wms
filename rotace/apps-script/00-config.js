@@ -95,3 +95,17 @@ function nastavControl_(klic, hodnota) {
 function formatDatumCas_(datum) {
   return Utilities.formatDate(datum, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
 }
+
+/**
+ * Čas nakládky pro čtečku, vždy jako `RRRR-MM-DD HH:MM`.
+ *
+ * Do tabulky se zapisuje text, ale Sheets si ho převede na datum. Při čtení
+ * pak vyleze objekt Date a prosté String() z něj udělá „Mon Nov 23 2026…",
+ * což skladníkovi nic neřekne. Proto se formátuje tady, na jednom místě.
+ */
+function formatNakladku_(hodnota) {
+  if (hodnota instanceof Date) {
+    return Utilities.formatDate(hodnota, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  }
+  return String(hodnota || '').trim();
+}

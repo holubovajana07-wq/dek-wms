@@ -77,7 +77,7 @@ function apiSeznam_(kdo) {
       stroj: stroj,
       psk: radek[SL.PSK - 1],
       nazev: radek[SL.NAZEV - 1],
-      nakladka: String(radek[SL.NAKLADKA - 1]),
+      nakladka: formatNakladku_(radek[SL.NAKLADKA - 1]),
       lokace: vZasobe ? vZasobe.lokace : '',
       naSklade: vZasobe ? vZasobe.stav === ZASOBA_NA_SKLADE : false
     });
@@ -202,6 +202,7 @@ function apiPsp_(id, psp, kdo) {
     'ID stroje nalozene: ' + hodnoty[SL.STROJ_SKUT - 1] + '\n' +
     'PSP: ' + psp + '\n' +
     'Nalozeno: ' + (vydej ? formatDatumCas_(new Date(vydej)) : '') + '\n' +
+    'Nakladka: ' + formatNakladku_(hodnoty[SL.NAKLADKA - 1]) + '\n' +
     '### KONEC';
 
   const ticketId = hodnoty[SL.TICKET - 1];
