@@ -9,12 +9,22 @@
 function nastavTabulku() {
   const ss = tabulka_();
 
-  zalozList_(ss, LIST_ROTACE, [
+  const hlavickaRotace = [
     'ID požadavku', 'Ticket', 'Přijato', 'Sklad', 'Pobočka',
     'ID stroje požadované', 'PSK', 'Název položky', 'Nakládka plán', 'Stav',
     'ID stroje skutečné', 'Lokace', 'WMS výdej', 'PSP', 'Uzavřeno',
-    'Poznámka', 'Režim'
-  ]);
+    'Poznámka', 'Režim', 'Odpověď na'
+  ];
+  const listRotace = zalozList_(ss, LIST_ROTACE, hlavickaRotace);
+
+  // Sloupce, které přibyly později, doplnit i do listu, který už existuje.
+  if (listRotace.getLastColumn() < hlavickaRotace.length) {
+    const od = listRotace.getLastColumn() + 1;
+    const chybi = hlavickaRotace.slice(od - 1);
+    listRotace.getRange(1, od, 1, chybi.length).setValues([chybi])
+      .setFontWeight('bold').setBackground('#d9d9d9');
+    Logger.log('Doplněny sloupce: ' + chybi.join(', '));
+  }
 
   zalozList_(ss, LIST_ZASOBA, [
     'ID stroje', 'PSK', 'Název', 'Sklad', 'Lokace', 'Stav', 'Poslední pohyb'

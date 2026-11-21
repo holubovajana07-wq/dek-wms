@@ -7,9 +7,9 @@ const SL = {   // sloupce listu ROTACE (1 = A)
   ID: 1, TICKET: 2, PRIJATO: 3, SKLAD: 4, POBOCKA: 5,
   STROJ_POZ: 6, PSK: 7, NAZEV: 8, NAKLADKA: 9, STAV: 10,
   STROJ_SKUT: 11, LOKACE: 12, VYDEJ: 13, PSP: 14, UZAVRENO: 15,
-  POZNAMKA: 16, REZIM: 17
+  POZNAMKA: 16, REZIM: 17, ODPOVED_NA: 18
 };
-const SL_POCET = 17;
+const SL_POCET = 18;
 
 /** Rozebere blok klíč: hodnota z těla požadavku. */
 function rozeberPozadavek_(telo) {
@@ -193,7 +193,8 @@ function zapisPozadavek_(pole, ticketId) {
     STAV_K_VYDEJI,
     '', '', '', '', '',
     '',
-    (pole['rezim'] || 'OSTRY').toUpperCase()
+    (pole['rezim'] || 'OSTRY').toUpperCase(),
+    pole['odpoved na'] || ''      // adresa aplikace půjčovny, chodí jí kopie
   ];
 
   const cilovy = radek || list.getLastRow() + 1;
@@ -249,8 +250,8 @@ function odpovezPrijato_(ticketId, id, pole) {
     '### KONEC';
 
   try {
-    const vysledek = rtOdpovez_(ticketId, text);
-    log_('ODPOVĚĎ PRIJATO', id, vysledek.kod === 200 ? 'OK' : 'CHYBA', String(vysledek.kod));
+    const vysledek = rtOdpovez_(ticketId, text, pole['odpoved na']);
+    log_('ODPOVĚĎ PRIJATO', id, 'OK', rtHlaskaOdpovedi_(vysledek.text));
   } catch (err) {
     log_('ODPOVĚĎ PRIJATO', id, 'CHYBA', err.message);
   }

@@ -110,14 +110,22 @@ function rtTeloTicketu_(ticketId) {
     .join('\n');
 }
 
-function rtOdpovez_(ticketId, text) {
+/**
+ * Odpověď do ticketu. `kopie` je adresa, které má přijít kopie –
+ * podle kontraktu schránka aplikace půjčovny, aby věděla, který stroj
+ * z CS skutečně odjel.
+ */
+function rtOdpovez_(ticketId, text, kopie) {
   const telo = String(text || '')
     .split(/\r?\n/)
     .map(radek => ' ' + radek)
     .join('\n');
 
-  return rtPost_('/REST/1.0/ticket/' + ticketId + '/comment',
-    'Action: correspond\nText:\n' + telo + '\n');
+  let obsah = 'Action: correspond\n';
+  if (kopie) obsah += 'Cc: ' + String(kopie).trim() + '\n';
+  obsah += 'Text:\n' + telo + '\n';
+
+  return rtPost_('/REST/1.0/ticket/' + ticketId + '/comment', obsah);
 }
 
 function rtUzavri_(ticketId) {
@@ -136,6 +144,38 @@ function rtHlaskaOdpovedi_(text) {
     .map(r => r.trim())
     .filter(r => r.indexOf('#') === 0);
   return radky.length ? radky.join(' ') : '(RT nic nenapsal)';
+}
+
+/**
+ * DIAGNOSTIKA, jen čte: komu RT u toho ticketu posílá poštu.
+ *
+ * Když odpověď „dorazila" do RT, ale nikomu nepřišel e-mail, bývá to tím,
+ * že ticket nemá žadatele (Requestors), nebo je jím adresa fronty.
+ */
+function zkontrolujTicket(ticketId) {
+  const list = list_(LIST_ROTACE);
+  if (!ticketId) {
+    const posledni = list.getLastRow();
+    if (posledni < 2) { Logger.log('V listu ROTACE nic není.'); return; }
+    ticketId = String(list.getRange(posledni, 2).getValue() || '').trim();
+  }
+
+  const text = rtGet_('/REST/1.0/ticket/' + ticketId + '/show');
+
+  const zpravy = ['Ticket: ' + ticketId];
+  ['Subject', 'Status', 'Queue', 'Creator', 'Requestors', 'Cc', 'AdminCc', 'Created']
+    .forEach(klic => {
+      const hodnota = rtHodnota_(text, klic);
+      zpravy.push(klic + ': ' + (hodnota || '(prázdné)'));
+    });
+
+  if (!rtHodnota_(text, 'Requestors')) {
+    zpravy.push('', '→ Ticket nemá žadatele. RT nemá komu odpověď poslat,' +
+      ' i když ji do ticketu zapíše.');
+  }
+
+  Logger.log(zpravy.join('\n'));
+  return zpravy.join('\n');
 }
 
 /**

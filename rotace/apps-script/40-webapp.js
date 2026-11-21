@@ -226,7 +226,7 @@ function uzavriSPsp_(list, radek, psp, kdoText) {
 
   if (ticketId) {
     try {
-      const vysledekOdpovedi = rtOdpovez_(ticketId, text);
+      const vysledekOdpovedi = rtOdpovez_(ticketId, text, hodnoty[SL.ODPOVED_NA - 1]);
       const vysledekUzavreni = rtUzavri_(ticketId);
       // Co RT doopravdy udělal, stojí na řádku s #, ne ve stavovém řádku.
       odpoved = 'ticket ' + ticketId +
