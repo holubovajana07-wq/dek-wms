@@ -10,8 +10,10 @@ function doGet(e) {
   try {
     // Veřejné akce – bez nich by se skladník neměl jak přihlásit.
     switch (p.action) {
+      // Verzi zvyšovat při každé změně backendu – podle ní se pozná,
+      // jestli je nasazená aktuální verze, nebo běží stará.
       case 'ping':
-        return json_({ ok: true, verze: '2.0', cas: new Date() });
+        return json_({ ok: true, verze: '2.5', cas: new Date() });
       case 'sklady':
         return json_({ ok: true, sklady: Object.keys(SKLADY).map(k => ({ kod: k, nazev: SKLADY[k] })) });
       case 'uzivatele':
