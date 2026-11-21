@@ -285,6 +285,17 @@ V e-mailu je sklad, pobočka, ID naloženého stroje (a za co je případně
 náhradou), položka, čas naložení, termín nakládky, kdo nakládal, ID požadavku
 a číslo ticketu.
 
+> ⚠ **Odesílání pošty potřebuje vlastní oprávnění.** Když se do skriptu přidá
+> posílání e-mailů, Google si o svolení řekne znovu – a dokud se nepotvrdí,
+> e-mail prostě neodejde. **Po potvrzení spustit `nastavSpoust()` znovu**,
+> protože spouště běží s oprávněním, které platilo při jejich založení.
+> Ověřit se to dá funkcí `testEmailPsp()`.
+>
+> ⚠ **Strop je 100 e-mailů denně** a posílá se **ze soukromého účtu**, pod kterým
+> skript běží. Firemní filtry to můžou odkládat do spamu. Souvisí to s tím,
+> co je o politice 7.2 zapsané u půjčovny – do ostrého provozu to chce
+> firemní účet.
+
 **Uzavření:** číslo PSP napsat do sloupce `PSP` u červeného řádku v listu
 `ROTACE`. Do minuty robot odešle pobočce odpověď `NALOZENO`, uzavře ticket
 a řádek zezelená. Je to **jediná cesta**, jak se požadavek uzavírá.

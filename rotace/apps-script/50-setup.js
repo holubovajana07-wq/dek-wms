@@ -214,6 +214,49 @@ function kontrolaNastaveni() {
   return zpravy.join('\n');
 }
 
+/**
+ * DIAGNOSTIKA odesílání e-mailu.
+ *
+ * Rozliší tři různé příčiny, které vypadají stejně („nepřišel e-mail"):
+ * chybějící vlastnost, vyčerpaný denní limit, a problém s doručením.
+ */
+function testEmailPsp() {
+  const zpravy = [];
+
+  const komu = vlastnost_('EMAIL_PSP');
+  zpravy.push('EMAIL_PSP: ' + (komu ? komu : '❌ NENÍ NASTAVENO'));
+
+  let zbyva = '?';
+  try { zbyva = MailApp.getRemainingDailyQuota(); } catch (err) { zbyva = 'nelze zjistit: ' + err.message; }
+  zpravy.push('Zbývá e-mailů na dnešek: ' + zbyva);
+
+  zpravy.push('Odesílá se z účtu: ' + (Session.getActiveUser().getEmail() || '(nezjištěno)'));
+
+  if (!komu) {
+    zpravy.push('', '→ Nastav vlastnost EMAIL_PSP a spusť znovu.');
+    Logger.log(zpravy.join('\n'));
+    return zpravy.join('\n');
+  }
+
+  try {
+    MailApp.sendEmail({
+      to: komu,
+      subject: 'Rotace: zkouška odesílání',
+      body: 'Tohle je zkušební zpráva z robota rotace.\n\n' +
+            'Když dorazila, odesílání funguje a chybějící upozornění\n' +
+            'o vystavení PSP má jinou příčinu – podívej se do listu ROTACE_LOG\n' +
+            'na řádky ŽÁDOST O PSP.'
+    });
+    zpravy.push('', '→ Odesláno bez chyby. Když nic nepřijde, hledej ve spamu' +
+      ' nebo to blokují firemní filtry.');
+  } catch (err) {
+    zpravy.push('', '❌ Odeslání selhalo: ' + err.message);
+  }
+
+  Logger.log(zpravy.join('\n'));
+  return zpravy.join('\n');
+}
+
 /** Projde rozebrání vzorového požadavku, aniž by se sáhlo na helpdesk. */
 function testRozebrani() {
   const vzorek =
