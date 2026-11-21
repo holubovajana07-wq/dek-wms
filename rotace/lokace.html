@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Štítky lokací – půjčovna CS</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+  :root{ --cervena:#c0392b; --seda:#555; --ramecek:#bbb; }
+  *{box-sizing:border-box}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    margin:0;padding:18px;background:#f4f4f4;color:#111;
+  }
+  h1{font-size:22px;margin:0 0 4px}
+  .uvod{color:var(--seda);font-size:14px;max-width:700px;margin-bottom:16px}
+  .ovladani{
+    background:#fff;border:1px solid var(--ramecek);border-radius:10px;
+    padding:14px;margin-bottom:18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;
+  }
+  .ovladani label{font-size:14px;display:flex;align-items:center;gap:6px}
+  button{
+    font:inherit;font-weight:700;padding:10px 18px;border:0;border-radius:8px;
+    background:var(--cervena);color:#fff;cursor:pointer;
+  }
+  h2{font-size:16px;margin:22px 0 8px;border-bottom:2px solid var(--ramecek);padding-bottom:6px}
+  .mrizka{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  .stitek{
+    background:#fff;border:1px solid var(--ramecek);border-radius:6px;
+    padding:10px;text-align:center;break-inside:avoid;
+  }
+  .stitek .kod{font-size:17px;font-weight:800;letter-spacing:1px;font-family:ui-monospace,monospace}
+  .stitek svg{width:100%;height:46px}
+  .pocet{color:var(--seda);font-size:14px}
+
+  @media print{
+    body{background:#fff;padding:0}
+    .ovladani,.uvod,h1{display:none}
+    h2{page-break-before:always;border:0;font-size:13px}
+    h2:first-of-type{page-break-before:auto}
+    .mrizka{grid-template-columns:repeat(3,1fr);gap:4px}
+    .stitek{border:1px solid #999;border-radius:0;padding:6px}
+    .stitek svg{height:38px}
+  }
+</style>
+</head>
+<body>
+
+<h1>Štítky lokací – půjčovna CS</h1>
+<div class="uvod">
+  Čárové kódy (Code 128) pro regály a venkovní plochy. Vytisknout, nařezat
+  a nalepit na místa. Skladník pak lokaci <strong>naskenuje</strong> místo
+  vybírání ze seznamu – při dvou stovkách míst je to jediná schůdná cesta.
+  Kód v čárovém kódu je přesně ten text, který je pod ním.
+</div>
+
+<div class="ovladani">
+  <label><input type="checkbox" id="vnitrni" checked> Vnitřní (H1-I-06 až H1-I-31, patra 00–06)</label>
+  <label><input type="checkbox" id="venkovni" checked> Venkovní (V1-H-01 až 13, V1-I-01 až 13)</label>
+  <label>Od regálu <input type="number" id="odRegalu" value="6" min="6" max="31" style="width:64px"></label>
+  <label>do <input type="number" id="doRegalu" value="31" min="6" max="31" style="width:64px"></label>
+  <button onclick="vykresli()">Překreslit</button>
+  <button onclick="window.print()">Tisk</button>
+  <span class="pocet" id="pocet"></span>
+</div>
+
+<div id="obsah"></div>
+
+<script>
+const PATRA = ['00','01','02','03','04','05','06'];
+
+function dvojciferne(cislo){ return ('0' + cislo).slice(-2); }
+
+/** Vnitřní lokace: H1-I-<regál>-<patro> */
+function vnitrniLokace(odRegalu, doRegalu){
+  const seznam = [];
+  for(let regal = odRegalu; regal <= doRegalu; regal++){
+    PATRA.forEach(function(patro){
+      seznam.push('H1-I-' + dvojciferne(regal) + '-' + patro);
+    });
+  }
+  return seznam;
+}
+
+/** Venkovní lokace: V1-H-01..13 a V1-I-01..13 */
+function venkovniLokace(){
+  const seznam = [];
+  ['H','I'].forEach(function(rada){
+    for(let cislo = 1; cislo <= 13; cislo++){
+      seznam.push('V1-' + rada + '-' + dvojciferne(cislo));
+    }
+  });
+  return seznam;
+}
+
+function sekce(nadpis, kody){
+  const h2 = document.createElement('h2');
+  h2.textContent = nadpis + ' — ' + kody.length + ' ks';
+  document.getElementById('obsah').appendChild(h2);
+
+  const mrizka = document.createElement('div');
+  mrizka.className = 'mrizka';
+  document.getElementById('obsah').appendChild(mrizka);
+
+  kody.forEach(function(kod){
+    const stitek = document.createElement('div');
+    stitek.className = 'stitek';
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    stitek.appendChild(svg);
+
+    const popis = document.createElement('div');
+    popis.className = 'kod';
+    popis.textContent = kod;
+    stitek.appendChild(popis);
+
+    mrizka.appendChild(stitek);
+
+    JsBarcode(svg, kod, {
+      format: 'CODE128',
+      displayValue: false,
+      margin: 2,
+      height: 44
+    });
+  });
+}
+
+function vykresli(){
+  document.getElementById('obsah').innerHTML = '';
+
+  const odRegalu = Math.max(6, Math.min(31, Number(document.getElementById('odRegalu').value) || 6));
+  const doRegalu = Math.max(odRegalu, Math.min(31, Number(document.getElementById('doRegalu').value) || 31));
+
+  let celkem = 0;
+
+  if(document.getElementById('vnitrni').checked){
+    // Po regálech, ať se při lepení nemusí nic hledat.
+    for(let regal = odRegalu; regal <= doRegalu; regal++){
+      const kody = vnitrniLokace(regal, regal);
+      sekce('Regál H1-I-' + dvojciferne(regal), kody);
+      celkem += kody.length;
+    }
+  }
+
+  if(document.getElementById('venkovni').checked){
+    const kody = venkovniLokace();
+    sekce('Venkovní plochy V1', kody);
+    celkem += kody.length;
+  }
+
+  document.getElementById('pocet').textContent = 'celkem ' + celkem + ' štítků';
+}
+
+vykresli();
+</script>
+</body>
+</html>
