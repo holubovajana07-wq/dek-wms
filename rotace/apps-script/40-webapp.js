@@ -85,7 +85,18 @@ function apiSeznam_(kdo) {
 
   polozky.sort((a, b) => String(a.nakladka).localeCompare(String(b.nakladka)));
 
-  return { ok: true, polozky: polozky, kdo: kdo };
+  // Běžné převozy přes CS – jen pro přehled, odbavují se ve WMS.
+  // Jedou přes CS2, takže pro Prostějov se nenabízejí.
+  let bezne = [];
+  if (kdeSklad === 'S096') {
+    try {
+      bezne = pspCekajiciNaVydej_();
+    } catch (err) {
+      log_('PŘEHLED PSP', '', 'CHYBA', err.message);
+    }
+  }
+
+  return { ok: true, polozky: polozky, bezne: bezne, kdo: kdo };
 }
 
 /** Náhradní kusy ze stejné skupiny – vždy jen z vlastního skladu. */

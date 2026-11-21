@@ -41,6 +41,11 @@
   .cas{font-weight:700}
   .pozde{color:var(--cervena)}
   .udaj{font-size:17px;font-weight:700;margin:8px 0;letter-spacing:.3px}
+  .karta.bezny{border-left:8px solid var(--ramecek)}
+  .oddelovac{
+    margin:22px 0 10px;font-weight:700;color:var(--seda);
+    border-top:2px solid var(--ramecek);padding-top:12px;
+  }
   button{
     font-family:inherit;font-size:19px;font-weight:700;
     padding:16px;width:100%;border:0;border-radius:10px;
@@ -91,7 +96,7 @@
 
 <script src="konfigurace.js"></script>
 <script>
-const VERZE = '2.3';
+const VERZE = '2.4';
 
 let stav = {
   url: (typeof ROTACE_URL !== 'undefined' && ROTACE_URL) ? ROTACE_URL : '',
@@ -100,7 +105,8 @@ let stav = {
   sklad: '',
   nazevSkladu: '',
   platnostDo: 0,
-  polozky: [],
+  polozky: [],        // prioritní nakládky z rotace
+  bezne: [],          // běžná PSP čekající na CS (jen pro přehled)
   pobocka: null,      // otevřená pobočka; null = seznam poboček
   aktualni: null
 };
@@ -374,6 +380,7 @@ async function nactiSeznam(zprava, typZpravy, tiche){
   try{
     const data = await zavolej('seznam', {});
     stav.polozky = data.polozky || [];
+    stav.bezne = data.bezne || [];
     vykresliSeznam(zprava, typZpravy);
   }catch(err){
     // Vypršelý nebo neplatný klíč = zpátky na přihlášení, ne hláška do prázdna.
@@ -403,9 +410,18 @@ function vykresliSeznam(zprava, typZpravy){
   let html = zprava ? pruh(typZpravy || 'ok', zprava) : '';
   if(nove) html += pruh('pozor', nove === 1 ? 'Přibyla nová nakládka.' : 'Přibyly nové nakládky: ' + nove);
 
+  // Do jednoho seznamu patří obojí: prioritní nakládky i běžná PSP,
+  // která na CS čekají na odeslání.
   const skupiny = {};
-  stav.polozky.forEach(function(p){
-    (skupiny[p.pobocka] = skupiny[p.pobocka] || []).push(p);
+  function skupina(kod){
+    if(!skupiny[kod]) skupiny[kod] = { prio: [], bezne: [], nazev: '' };
+    return skupiny[kod];
+  }
+  stav.polozky.forEach(function(p){ skupina(p.pobocka).prio.push(p); });
+  (stav.bezne || []).forEach(function(d){
+    const s = skupina(d.pobocka);
+    s.bezne.push(d);
+    if(!s.nazev) s.nazev = d.nazevPobocky || '';
   });
 
   // Pobočka, kterou skladník otevřel, už nemusí mít co nakládat.
@@ -414,7 +430,7 @@ function vykresliSeznam(zprava, typZpravy){
   if(stav.pobocka){
     hlavicka('Pobočka ' + stav.pobocka, stav.sklad);
 
-    skupiny[stav.pobocka].forEach(function(p){
+    skupiny[stav.pobocka].prio.forEach(function(p){
       const index = stav.polozky.indexOf(p);
       html +=
         '<div class="karta prio" data-index="'+index+'">' +
@@ -429,6 +445,26 @@ function vykresliSeznam(zprava, typZpravy){
         '</div>';
     });
 
+    const bezne = skupiny[stav.pobocka].bezne;
+    if(bezne.length){
+      html += '<div class="oddelovac">Běžné převozy přes CS — ' + bezne.length +
+              '<br><span class="popisek">odbavují se v DEK WMS</span></div>';
+
+      bezne.forEach(function(d){
+        html +=
+          '<div class="karta bezny">' +
+            '<div class="udaj">NA POBOČKU: '+h(d.pobocka)+'</div>' +
+            '<div class="velke" style="font-size:22px">'+h(d.psp)+'</div>' +
+            d.polozky.map(function(p){
+              return '<div class="radek"><span>' +
+                (p.stroj ? '<strong>'+h(p.stroj)+'</strong> ' : '') +
+                h(p.nazev) + '</span><span class="popisek">' +
+                (p.lokace ? h(p.lokace) : '') + '</span></div>';
+            }).join('') +
+          '</div>';
+      });
+    }
+
     html += '<button class="vedlejsi" onclick="zpetNaPobocky()">Zpět na pobočky</button>';
 
   }else{
@@ -437,22 +473,28 @@ function vykresliSeznam(zprava, typZpravy){
     const pobocky = Object.keys(skupiny).sort();
 
     if(!pobocky.length){
-      html += '<div class="prazdno">Žádná prioritní nakládka nečeká.</div>';
+      html += '<div class="prazdno">Na tomhle skladu nic nečeká.</div>';
     }else{
       pobocky.forEach(function(kod){
-        const polozky = skupiny[kod];
-        const nejblizsi = polozky.map(function(p){ return p.nakladka; }).sort()[0];
-        const chybi = polozky.filter(function(p){ return !p.naSklade; }).length;
+        const s = skupiny[kod];
+        const maPrio = s.prio.length > 0;
+        const nejblizsi = s.prio.map(function(p){ return p.nakladka; }).sort()[0];
+        const chybi = s.prio.filter(function(p){ return !p.naSklade; }).length;
 
         html +=
-          '<div class="karta prio pobocka-volba" data-pobocka="'+h(kod)+'">' +
-            '<span class="odznak">PRIORITNÍ</span>' +
+          '<div class="karta pobocka-volba ' + (maPrio ? 'prio' : 'bezny') +
+            '" data-pobocka="'+h(kod)+'">' +
+            (maPrio ? '<span class="odznak">PRIORITNÍ</span>' : '') +
             '<div class="velke">'+h(kod)+'</div>' +
-            '<div class="udaj'+(jePozde(nejblizsi)?' pozde':'')+'">NUTNO NALOŽIT: ' +
-              h(formatNakladka(nejblizsi)) + '</div>' +
-            '<div class="nazev">' + polozky.length +
-              (polozky.length === 1 ? ' stroj k naložení' :
-               polozky.length < 5 ? ' stroje k naložení' : ' strojů k naložení') + '</div>' +
+            (s.nazev ? '<div class="nazev">'+h(s.nazev)+'</div>' : '') +
+            (maPrio
+              ? '<div class="udaj'+(jePozde(nejblizsi)?' pozde':'')+'">NUTNO NALOŽIT: ' +
+                  h(formatNakladka(nejblizsi)) + '</div>'
+              : '') +
+            '<div class="radek"><span class="popisek">prioritní nakládky</span>' +
+              '<strong>'+s.prio.length+'</strong></div>' +
+            '<div class="radek"><span class="popisek">běžná PSP na CS</span>' +
+              '<strong>'+s.bezne.length+'</strong></div>' +
             (chybi ? pruh('pozor', chybi === 1 ? 'Jeden kus není v zásobě.' : chybi + ' kusy nejsou v zásobě.') : '') +
           '</div>';
       });
